@@ -20,4 +20,16 @@ serde_yaml = "0.9.34"
 # Dependencies will be added via cargo add - no static versions
 
 [build-dependencies]
-# For build.rs if needed 
+# For build.rs if needed
+
+[dev-dependencies]
+tempfile = "3.12"
+assert_cmd = "2.0"
+predicates = "3.1"
+serial_test = "3.1"
+criterion = "0.5"
+proptest = "1.4"
+
+[[bench]]
+name = "scaffold_bench"
+harness = false 

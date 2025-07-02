@@ -48,6 +48,14 @@ fn create_project(cli: &Cli, config: &Config) -> Result<()> {
         .unwrap_or(&default_dir);
     
     // Validate project name
+    if project_name.is_empty() {
+        return Err(eyre::eyre!("Project name cannot be empty"));
+    }
+    
+    if project_name.starts_with('-') || project_name.starts_with('_') {
+        return Err(eyre::eyre!("Project name cannot start with '-' or '_' (these look like CLI flags)"));
+    }
+    
     if !project_name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
         return Err(eyre::eyre!("Project name must contain only alphanumeric characters, hyphens, and underscores"));
     }
