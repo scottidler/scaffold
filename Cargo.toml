@@ -31,6 +31,4 @@ criterion = "0.6"
 proptest = "1.7"
 toml = "0.8"
 
-[[bench]]
-name = "scaffold_bench"
-harness = false 
+
