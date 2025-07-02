@@ -29,6 +29,7 @@ predicates = "3.1"
 serial_test = "3.1"
 criterion = "0.5"
 proptest = "1.4"
+toml = "0.8"
 
 [[bench]]
 name = "scaffold_bench"
