@@ -1,0 +1,47 @@
+# scaffold.yml - Configuration for the scaffold tool
+# This config controls how the scaffold tool generates new projects
+
+# Default author information for generated Cargo.toml files
+default_author: "Scott Idler <scott.a.idler@gmail.com>"
+
+# Default license for generated projects
+default_license: "MIT"
+
+# Whether to initialize git repositories in generated projects
+create_git_repo: true
+
+# Whether to create sample config files in generated projects
+create_sample_config: true
+
+# Enable debug logging
+debug: false
+
+# Template configuration - controls what gets generated
+template:
+  # Default project structure
+  create_build_rs: true
+  create_cli_module: true
+  create_config_module: true
+  
+  # Default dependencies to add via cargo add
+  dependencies:
+    - name: "clap"
+      features: ["derive"]
+    - name: "eyre"
+    - name: "log"
+    - name: "env_logger"
+    - name: "serde"
+      features: ["derive"]
+    - name: "serde_yaml"
+    - name: "dirs"
+    - name: "colored"
+  
+  # Sample config values for generated projects
+  sample_config:
+    name: "John Doe"
+    age: 30
+    debug: false
+    
+  # Default CLI structure
+  cli:
+    after_help: "Logs are written to: ~/.local/share/{{PROJECT_NAME}}/logs/{{PROJECT_NAME}}.log" 
