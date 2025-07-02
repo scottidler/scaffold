@@ -10,25 +10,25 @@ use std::path::PathBuf;
 )]
 pub struct Cli {
     /// Name of the project to create
-    pub project_name: String,
-    
+    pub project: String,
+
     /// Author name for Cargo.toml
     #[arg(short, long, help = "Author name for Cargo.toml")]
     pub author: Option<String>,
-    
+
     /// Target directory (default: ./<project-name>)
     #[arg(short, long, help = "Target directory (default: ./<project-name>)")]
     pub directory: Option<PathBuf>,
-    
+
     /// Path to config file
     #[arg(short, long, help = "Path to config file")]
     pub config: Option<PathBuf>,
-    
+
     /// Don't initialize git repository
     #[arg(long, help = "Don't initialize git repository")]
     pub no_git: bool,
-    
+
     /// Don't create sample config file
     #[arg(long, help = "Don't create sample config file")]
     pub no_sample_config: bool,
-} 
+}

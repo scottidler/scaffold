@@ -46,7 +46,7 @@ fn test_help_command() {
         .success()
         .stdout(predicate::str::contains("A Rust CLI project scaffolding tool"))
         .stdout(predicate::str::contains("Usage: scaffold"))
-        .stdout(predicate::str::contains("PROJECT_NAME"))
+        .stdout(predicate::str::contains("PROJECT"))
         .stdout(predicate::str::contains("--author"))
         .stdout(predicate::str::contains("--directory"))
         .stdout(predicate::str::contains("--config"))

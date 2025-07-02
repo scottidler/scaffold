@@ -22,7 +22,7 @@ template:
   create_build_rs: true
   create_cli_module: true
   create_config_module: true
-  
+
   # Default dependencies to add via cargo add
   dependencies:
     - name: "clap"
@@ -35,13 +35,13 @@ template:
     - name: "serde_yaml"
     - name: "dirs"
     - name: "colored"
-  
+
   # Sample config values for generated projects
   sample_config:
     name: "John Doe"
     age: 30
     debug: false
-    
+
   # Default CLI structure
   cli:
-    after_help: "Logs are written to: ~/.local/share/{{PROJECT_NAME}}/logs/{{PROJECT_NAME}}.log" 
+    after_help: "Logs are written to: ~/.local/share/{{PROJECT}}/logs/{{PROJECT}}.log"

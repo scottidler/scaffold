@@ -68,7 +68,7 @@ fn test_template_config_default_sample_config() {
 #[test]
 fn test_cli_config_default() {
     let cli_config = CliConfig::default();
-    assert!(cli_config.after_help.contains("{{PROJECT_NAME}}"));
+    assert!(cli_config.after_help.contains("{{PROJECT}}"));
     assert!(cli_config.after_help.contains("~/.local/share"));
     assert!(cli_config.after_help.contains("logs"));
 }

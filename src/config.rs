@@ -82,7 +82,7 @@ impl Default for TemplateConfig {
 impl Default for CliConfig {
     fn default() -> Self {
         Self {
-            after_help: "Logs are written to: ~/.local/share/{{PROJECT_NAME}}/logs/{{PROJECT_NAME}}.log".to_string(),
+            after_help: "Logs are written to: ~/.local/share/{{PROJECT}}/logs/{{PROJECT}}.log".to_string(),
         }
     }
 }

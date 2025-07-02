@@ -40,25 +40,25 @@ fn setup_logging() -> Result<()> {
 }
 
 fn create_project(cli: &Cli, config: &Config) -> Result<()> {
-    let project_name = &cli.project_name;
-    let default_dir = PathBuf::from(project_name);
+    let project = &cli.project;
+    let default_dir = PathBuf::from(project);
     let target_dir = cli.directory.as_ref()
         .unwrap_or(&default_dir);
 
-    if project_name.is_empty() {
+    if project.is_empty() {
         return Err(eyre::eyre!("Project name cannot be empty"));
     }
 
-    if project_name.starts_with('-') || project_name.starts_with('_') {
+    if project.starts_with('-') || project.starts_with('_') {
         return Err(eyre::eyre!("Project name cannot start with '-' or '_' (these look like CLI flags)"));
     }
 
-    if !project_name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+    if !project.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
         return Err(eyre::eyre!("Project name must contain only alphanumeric characters, hyphens, and underscores"));
     }
 
-    info!("Creating project: {}", project_name);
-    println!("{} Creating project: {}", "✓".green(), project_name.cyan());
+    info!("Creating project: {}", project);
+    println!("{} Creating project: {}", "✓".green(), project.cyan());
 
     if target_dir.exists() {
         if target_dir.read_dir()?.next().is_some() {
@@ -71,7 +71,7 @@ fn create_project(cli: &Cli, config: &Config) -> Result<()> {
 
     println!("{} Created directory: {}", "✓".green(), target_dir.display());
 
-    templates::generate_project(project_name, target_dir, &cli.author.as_ref().unwrap_or(&config.default_author))?;
+    templates::generate_project(project, target_dir, &cli.author.as_ref().unwrap_or(&config.default_author))?;
 
     if !cli.no_git && config.create_git_repo {
         init_git_repo(target_dir)?;
@@ -80,7 +80,7 @@ fn create_project(cli: &Cli, config: &Config) -> Result<()> {
     add_dependencies(target_dir, config)?;
     verify_build(target_dir)?;
 
-    println!("\n{} Project {} created successfully!", "🎉".green(), project_name.cyan());
+    println!("\n{} Project {} created successfully!", "🎉".green(), project.cyan());
     println!("Next steps:");
     println!("  cd {}", target_dir.display());
     println!("  cargo run");
@@ -163,7 +163,7 @@ fn main() -> Result<()> {
     let config = Config::load(cli.config.as_ref())
         .context("Failed to load configuration")?;
 
-    info!("Starting scaffold with project name: {}", cli.project_name);
+    info!("Starting scaffold with project name: {}", cli.project);
 
     create_project(&cli, &config)
         .context("Failed to create project")?;

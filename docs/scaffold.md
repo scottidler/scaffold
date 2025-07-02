@@ -128,7 +128,7 @@ cargo add colored
 struct Cli {
     #[arg(short, long, help = "Path to config file")]
     config: Option<PathBuf>,
-    
+
     // Additional args as needed
 }
 ```
@@ -256,10 +256,10 @@ cargo add dirs
 All source file templates should be embedded in the scaffolding tool as string constants or included via `include_str!()` macro.
 
 ### Template Variables:
-- `{{PROJECT_NAME}}`: Project name
+- `{{PROJECT}}`: Project name
 - `{{AUTHOR}}`: Author name
-- `{{PROJECT_NAME_UPPER}}`: Uppercase project name
-- `{{PROJECT_NAME_LOWER}}`: Lowercase project name
+- `{{PROJECT_UPPER}}`: Uppercase project name
+- `{{PROJECT_LOWER}}`: Lowercase project name
 
 ### Testing Strategy:
 - **Unit tests**: Template generation functions
@@ -296,4 +296,4 @@ This design is based on analysis of the following projects:
 - `aws-tools`: Workspace dependency management
 - `git-tools`: Multi-project workspace structure
 
-The scaffolding tool should generate projects that embody the best practices found across these implementations while remaining simple and approachable for new CLI projects. 
+The scaffolding tool should generate projects that embody the best practices found across these implementations while remaining simple and approachable for new CLI projects.
