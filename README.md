@@ -1,0 +1,2 @@
+# scaffold
+spawn rust project
