@@ -80,7 +80,7 @@ fn create_project(cli: &Cli, config: &Config) -> Result<()> {
     if !cli.no_deps {
         add_dependencies(target_dir, config)?;
     }
-    
+
     if !cli.no_verify {
         verify_build(target_dir)?;
     }
@@ -334,9 +334,9 @@ mod tests {
         let config = create_test_config();
 
         let result = create_project(&cli, &config);
-        
+
         std::env::set_current_dir(original_dir).unwrap();
-        
+
         assert!(result.is_ok());
         assert!(temp_dir.path().join("test-default").exists());
     }
@@ -345,7 +345,7 @@ mod tests {
     fn test_create_project_uses_custom_author() {
         let temp_dir = TempDir::new().unwrap();
         let project_dir = temp_dir.path().join("test-author");
-        
+
         let mut cli = create_test_cli("test-author");
         cli.directory = Some(project_dir.clone());
         cli.author = Some("Custom Author <custom@test.com>".to_string());
@@ -362,7 +362,7 @@ mod tests {
     fn test_create_project_uses_config_author_as_fallback() {
         let temp_dir = TempDir::new().unwrap();
         let project_dir = temp_dir.path().join("test-config-author");
-        
+
         let mut cli = create_test_cli("test-config-author");
         cli.directory = Some(project_dir.clone());
         cli.author = None; // No author specified

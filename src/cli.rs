@@ -109,7 +109,7 @@ mod tests {
     fn test_cli_accepts_complex_project_names() {
         let valid_names = [
             "simple",
-            "with-dashes", 
+            "with-dashes",
             "with_underscores",
             "with123numbers",
             "a",
@@ -125,7 +125,7 @@ mod tests {
     #[test]
     fn test_cli_help_contains_expected_text() {
         let help = Cli::command().render_help().to_string();
-        
+
         assert!(help.contains("A Rust CLI project scaffolding tool"));
         assert!(help.contains("Name of the project to create"));
         assert!(help.contains("Author name for Cargo.toml"));
@@ -155,7 +155,7 @@ mod tests {
     #[test]
     fn test_cli_boolean_flags_default_false() {
         let cli = Cli::try_parse_from(&["scaffold", "test"]).unwrap();
-        
+
         assert!(!cli.no_git);
         assert!(!cli.no_sample_config);
         assert!(!cli.no_verify);
@@ -165,7 +165,7 @@ mod tests {
     #[test]
     fn test_cli_optional_fields_default_none() {
         let cli = Cli::try_parse_from(&["scaffold", "test"]).unwrap();
-        
+
         assert!(cli.author.is_none());
         assert!(cli.directory.is_none());
         assert!(cli.config.is_none());
