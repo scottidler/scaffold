@@ -37,18 +37,21 @@ pub struct Cli {
     pub no_verify: bool,
 
     /// Don't add dependencies with cargo add (much faster, generates basic Cargo.toml)
-    #[arg(long, help = "Don't add dependencies with cargo add (much faster, generates basic Cargo.toml)")]
+    #[arg(
+        long,
+        help = "Don't add dependencies with cargo add (much faster, generates basic Cargo.toml)"
+    )]
     pub no_deps: bool,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::{Parser, CommandFactory};
+    use clap::{CommandFactory, Parser};
 
     #[test]
     fn test_cli_parses_project_name() {
-        let cli = Cli::try_parse_from(&["scaffold", "my-project"]).unwrap();
+        let cli = Cli::try_parse_from(["scaffold", "my-project"]).unwrap();
         assert_eq!(cli.project, "my-project");
         assert!(cli.author.is_none());
         assert!(cli.directory.is_none());
@@ -61,17 +64,21 @@ mod tests {
 
     #[test]
     fn test_cli_parses_all_options() {
-        let cli = Cli::try_parse_from(&[
+        let cli = Cli::try_parse_from([
             "scaffold",
             "test-project",
-            "--author", "Test Author <test@example.com>",
-            "--directory", "/tmp/test",
-            "--config", "config.yml",
+            "--author",
+            "Test Author <test@example.com>",
+            "--directory",
+            "/tmp/test",
+            "--config",
+            "config.yml",
             "--no-git",
             "--no-sample-config",
             "--no-verify",
-            "--no-deps"
-        ]).unwrap();
+            "--no-deps",
+        ])
+        .unwrap();
 
         assert_eq!(cli.project, "test-project");
         assert_eq!(cli.author, Some("Test Author <test@example.com>".to_string()));
@@ -85,13 +92,17 @@ mod tests {
 
     #[test]
     fn test_cli_parses_short_flags() {
-        let cli = Cli::try_parse_from(&[
+        let cli = Cli::try_parse_from([
             "scaffold",
             "test-project",
-            "-a", "Short Author",
-            "-d", "/tmp/short",
-            "-c", "short.yml"
-        ]).unwrap();
+            "-a",
+            "Short Author",
+            "-d",
+            "/tmp/short",
+            "-c",
+            "short.yml",
+        ])
+        .unwrap();
 
         assert_eq!(cli.project, "test-project");
         assert_eq!(cli.author, Some("Short Author".to_string()));
@@ -101,7 +112,7 @@ mod tests {
 
     #[test]
     fn test_cli_requires_project_name() {
-        let result = Cli::try_parse_from(&["scaffold"]);
+        let result = Cli::try_parse_from(["scaffold"]);
         assert!(result.is_err());
     }
 
@@ -113,11 +124,11 @@ mod tests {
             "with_underscores",
             "with123numbers",
             "a",
-            "very-long-project-name-with-many-parts"
+            "very-long-project-name-with-many-parts",
         ];
 
         for name in valid_names.iter() {
-            let cli = Cli::try_parse_from(&["scaffold", name]).unwrap();
+            let cli = Cli::try_parse_from(["scaffold", name]).unwrap();
             assert_eq!(cli.project, *name);
         }
     }
@@ -154,7 +165,7 @@ mod tests {
 
     #[test]
     fn test_cli_boolean_flags_default_false() {
-        let cli = Cli::try_parse_from(&["scaffold", "test"]).unwrap();
+        let cli = Cli::try_parse_from(["scaffold", "test"]).unwrap();
 
         assert!(!cli.no_git);
         assert!(!cli.no_sample_config);
@@ -164,7 +175,7 @@ mod tests {
 
     #[test]
     fn test_cli_optional_fields_default_none() {
-        let cli = Cli::try_parse_from(&["scaffold", "test"]).unwrap();
+        let cli = Cli::try_parse_from(["scaffold", "test"]).unwrap();
 
         assert!(cli.author.is_none());
         assert!(cli.directory.is_none());

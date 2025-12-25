@@ -1,8 +1,8 @@
 use eyre::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::collections::HashMap;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(default)]
@@ -56,7 +56,10 @@ impl Default for TemplateConfig {
     fn default() -> Self {
         let mut sample_config = HashMap::new();
         sample_config.insert("name".to_string(), serde_yaml::Value::String("John Doe".to_string()));
-        sample_config.insert("age".to_string(), serde_yaml::Value::Number(serde_yaml::Number::from(30)));
+        sample_config.insert(
+            "age".to_string(),
+            serde_yaml::Value::Number(serde_yaml::Number::from(30)),
+        );
         sample_config.insert("debug".to_string(), serde_yaml::Value::Bool(false));
 
         Self {
@@ -64,14 +67,38 @@ impl Default for TemplateConfig {
             create_cli_module: true,
             create_config_module: true,
             dependencies: vec![
-                Dependency { name: "clap".to_string(), features: vec!["derive".to_string()] },
-                Dependency { name: "eyre".to_string(), features: vec![] },
-                Dependency { name: "log".to_string(), features: vec![] },
-                Dependency { name: "env_logger".to_string(), features: vec![] },
-                Dependency { name: "serde".to_string(), features: vec!["derive".to_string()] },
-                Dependency { name: "serde_yaml".to_string(), features: vec![] },
-                Dependency { name: "dirs".to_string(), features: vec![] },
-                Dependency { name: "colored".to_string(), features: vec![] },
+                Dependency {
+                    name: "clap".to_string(),
+                    features: vec!["derive".to_string()],
+                },
+                Dependency {
+                    name: "eyre".to_string(),
+                    features: vec![],
+                },
+                Dependency {
+                    name: "log".to_string(),
+                    features: vec![],
+                },
+                Dependency {
+                    name: "env_logger".to_string(),
+                    features: vec![],
+                },
+                Dependency {
+                    name: "serde".to_string(),
+                    features: vec!["derive".to_string()],
+                },
+                Dependency {
+                    name: "serde_yaml".to_string(),
+                    features: vec![],
+                },
+                Dependency {
+                    name: "dirs".to_string(),
+                    features: vec![],
+                },
+                Dependency {
+                    name: "colored".to_string(),
+                    features: vec![],
+                },
             ],
             sample_config,
             cli: CliConfig::default(),
@@ -92,8 +119,7 @@ impl Config {
     pub fn load(config_path: Option<&PathBuf>) -> Result<Self> {
         // If explicit config path provided, try to load it
         if let Some(path) = config_path {
-            return Self::load_from_file(path)
-                .context(format!("Failed to load config from {}", path.display()));
+            return Self::load_from_file(path).context(format!("Failed to load config from {}", path.display()));
         }
 
         // Try primary location: ~/.config/scaffold/scaffold.yml
@@ -126,24 +152,20 @@ impl Config {
     }
 
     fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let content = fs::read_to_string(&path)
-            .context("Failed to read config file")?;
+        let content = fs::read_to_string(&path).context("Failed to read config file")?;
 
-        let config: Self = serde_yaml::from_str(&content)
-            .context("Failed to parse config file")?;
+        let config: Self = serde_yaml::from_str(&content).context("Failed to parse config file")?;
 
         log::info!("Loaded config from: {}", path.as_ref().display());
         Ok(config)
     }
-
-
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use std::fs;
+    use tempfile::TempDir;
 
     #[test]
     fn test_config_default_values() {
@@ -278,7 +300,12 @@ template:
         assert_eq!(config.template.cli.after_help, "Custom help text");
 
         // Check custom dependency
-        let custom_dep = config.template.dependencies.iter().find(|d| d.name == "custom-dep").unwrap();
+        let custom_dep = config
+            .template
+            .dependencies
+            .iter()
+            .find(|d| d.name == "custom-dep")
+            .unwrap();
         assert!(custom_dep.features.contains(&"feature1".to_string()));
         assert!(custom_dep.features.contains(&"feature2".to_string()));
 
@@ -342,8 +369,14 @@ template:
         assert_eq!(original_config.default_author, deserialized_config.default_author);
         assert_eq!(original_config.default_license, deserialized_config.default_license);
         assert_eq!(original_config.create_git_repo, deserialized_config.create_git_repo);
-        assert_eq!(original_config.create_sample_config, deserialized_config.create_sample_config);
+        assert_eq!(
+            original_config.create_sample_config,
+            deserialized_config.create_sample_config
+        );
         assert_eq!(original_config.debug, deserialized_config.debug);
-        assert_eq!(original_config.template.dependencies.len(), deserialized_config.template.dependencies.len());
+        assert_eq!(
+            original_config.template.dependencies.len(),
+            deserialized_config.template.dependencies.len()
+        );
     }
 }

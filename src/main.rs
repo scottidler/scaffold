@@ -1,7 +1,7 @@
 use clap::Parser;
 use colored::*;
 use eyre::{Context, Result};
-use log::{info, warn, error};
+use log::{error, info, warn};
 
 use std::fs;
 use std::path::PathBuf;
@@ -20,16 +20,17 @@ fn setup_logging() -> Result<()> {
         .join("scaffold")
         .join("logs");
 
-    fs::create_dir_all(&log_dir)
-        .context("Failed to create log directory")?;
+    fs::create_dir_all(&log_dir).context("Failed to create log directory")?;
 
     let log_file = log_dir.join("scaffold.log");
 
-    let target = Box::new(fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_file)
-        .context("Failed to open log file")?);
+    let target = Box::new(
+        fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_file)
+            .context("Failed to open log file")?,
+    );
 
     env_logger::Builder::from_default_env()
         .target(env_logger::Target::Pipe(target))
@@ -42,36 +43,45 @@ fn setup_logging() -> Result<()> {
 fn create_project(cli: &Cli, config: &Config) -> Result<()> {
     let project = &cli.project;
     let default_dir = PathBuf::from(project);
-    let target_dir = cli.directory.as_ref()
-        .unwrap_or(&default_dir);
+    let target_dir = cli.directory.as_ref().unwrap_or(&default_dir);
 
     if project.is_empty() {
         return Err(eyre::eyre!("Project name cannot be empty"));
     }
 
     if project.starts_with('-') || project.starts_with('_') {
-        return Err(eyre::eyre!("Project name cannot start with '-' or '_' (these look like CLI flags)"));
+        return Err(eyre::eyre!(
+            "Project name cannot start with '-' or '_' (these look like CLI flags)"
+        ));
     }
 
     if !project.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
-        return Err(eyre::eyre!("Project name must contain only alphanumeric characters, hyphens, and underscores"));
+        return Err(eyre::eyre!(
+            "Project name must contain only alphanumeric characters, hyphens, and underscores"
+        ));
     }
 
     info!("Creating project: {}", project);
     println!("{} Creating project: {}", "✓".green(), project.cyan());
 
-    if target_dir.exists() {
-        if target_dir.read_dir()?.next().is_some() {
-            return Err(eyre::eyre!("Directory {} already exists and is not empty", target_dir.display()));
-        }
+    if target_dir.exists() && target_dir.read_dir()?.next().is_some() {
+        return Err(eyre::eyre!(
+            "Directory {} already exists and is not empty",
+            target_dir.display()
+        ));
     }
 
-    fs::create_dir_all(target_dir)
-        .context("Failed to create project directory")?;
+    fs::create_dir_all(target_dir).context("Failed to create project directory")?;
 
     println!("{} Created directory: {}", "✓".green(), target_dir.display());
 
-    templates::generate_project(project, target_dir, &cli.author.as_ref().unwrap_or(&config.default_author), config, cli.no_deps)?;
+    templates::generate_project(
+        project,
+        target_dir,
+        cli.author.as_ref().unwrap_or(&config.default_author),
+        config,
+        cli.no_deps,
+    )?;
 
     if !cli.no_git && config.create_git_repo {
         init_git_repo(target_dir)?;
@@ -96,7 +106,7 @@ fn create_project(cli: &Cli, config: &Config) -> Result<()> {
 fn init_git_repo(target_dir: &PathBuf) -> Result<()> {
     info!("Initializing git repository");
     let output = Command::new("git")
-        .args(&["init"])
+        .args(["init"])
         .current_dir(target_dir)
         .output()
         .context("Failed to run git init")?;
@@ -117,15 +127,15 @@ fn add_dependencies(target_dir: &PathBuf, config: &Config) -> Result<()> {
 
     for dep in &config.template.dependencies {
         let mut cmd = Command::new("cargo");
-        cmd.args(&["add", &dep.name])
-            .current_dir(target_dir);
+        cmd.args(["add", &dep.name]).current_dir(target_dir);
 
         if !dep.features.is_empty() {
             let features = format!("--features={}", dep.features.join(","));
             cmd.arg(features);
         }
 
-        let output = cmd.output()
+        let output = cmd
+            .output()
             .context(format!("Failed to add dependency: {}", dep.name))?;
 
         if !output.status.success() {
@@ -143,7 +153,7 @@ fn verify_build(target_dir: &PathBuf) -> Result<()> {
     println!("{} Verifying project builds...", "✓".green());
 
     let output = Command::new("cargo")
-        .args(&["build"])
+        .args(["build"])
         .current_dir(target_dir)
         .output()
         .context("Failed to run cargo build")?;
@@ -160,18 +170,15 @@ fn verify_build(target_dir: &PathBuf) -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    setup_logging()
-        .context("Failed to setup logging")?;
+    setup_logging().context("Failed to setup logging")?;
 
     let cli = Cli::parse();
 
-    let config = Config::load(cli.config.as_ref())
-        .context("Failed to load configuration")?;
+    let config = Config::load(cli.config.as_ref()).context("Failed to load configuration")?;
 
     info!("Starting scaffold with project name: {}", cli.project);
 
-    create_project(&cli, &config)
-        .context("Failed to create project")?;
+    create_project(&cli, &config).context("Failed to create project")?;
 
     Ok(())
 }
@@ -179,8 +186,8 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use std::fs;
+    use tempfile::TempDir;
 
     fn create_test_cli(project: &str) -> Cli {
         Cli {
@@ -272,7 +279,12 @@ mod tests {
 
         let result = create_project(&cli, &config);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("must contain only alphanumeric characters"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("must contain only alphanumeric characters")
+        );
     }
 
     #[test]
@@ -305,7 +317,12 @@ mod tests {
 
         let result = create_project(&cli, &config);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("already exists and is not empty"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("already exists and is not empty")
+        );
     }
 
     #[test]
