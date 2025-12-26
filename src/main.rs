@@ -49,6 +49,7 @@ fn is_scaffoldable_directory(dir: &std::path::Path) -> Result<bool> {
         ".github",
         ".editorconfig",
         ".vscode",
+        ".otto.yml",
         "README",
         "README.md",
         "README.txt",

@@ -29,6 +29,9 @@ pub fn generate_project(
     // Generate sample config file
     generate_sample_config(project_name, target_dir)?;
 
+    // Generate .otto.yml for CI
+    generate_otto_yml(project_name, target_dir)?;
+
     println!("{} Generated all project files", "✓".green());
     Ok(())
 }
@@ -329,6 +332,102 @@ debug: false
 
     fs::write(target_dir.join(format!("{}.yml", project_name)), sample_config)
         .context("Failed to write sample config")?;
+
+    Ok(())
+}
+
+fn generate_otto_yml(_project_name: &str, target_dir: &Path) -> Result<()> {
+    let otto_yml = r#"otto:
+  api: 1
+  tasks: [ci]
+  envs:
+    VERSION: "$(git describe --tags --always --dirty 2>/dev/null || echo 'dev')"
+
+tasks:
+  # Whitespace linting
+  lint:
+    help: "Run whitespace linting"
+    bash: |
+      whitespace -r
+
+  # Code quality checks
+  check:
+    help: "Run all quality checks (compile, clippy, format)"
+    bash: |
+      echo "=== Checking compilation ==="
+      cargo check --all-targets --all-features
+      echo ""
+      echo "=== Running Clippy ==="
+      cargo clippy --all-targets --all-features -- -D warnings
+      echo ""
+      echo "=== Checking format ==="
+      cargo fmt --all --check
+      echo ""
+      echo "✅ All checks passed!"
+
+  # Run tests
+  test:
+    help: "Run all tests"
+    bash: |
+      cargo test --all-features
+
+  # Code coverage with llvm-cov
+  cov:
+    help: "Run tests with coverage via llvm-cov (use --fail-under N for threshold)"
+    params:
+      --fail-under:
+        default: "0"
+        help: "Minimum line coverage percentage (0 = no threshold)"
+    bash: |
+      echo "🧪 Running tests with coverage..."
+      if [ "${fail_under}" != "0" ]; then
+        if cargo llvm-cov --all-features --html -q --fail-under-lines "${fail_under}"; then
+          echo ""
+          echo "✅ Coverage meets ${fail_under}% threshold"
+          echo "📊 Coverage report: target/llvm-cov/html/index.html"
+        else
+          echo ""
+          echo "❌ Coverage is below ${fail_under}% threshold"
+          echo "📊 Coverage report: target/llvm-cov/html/index.html"
+          exit 1
+        fi
+      else
+        cargo llvm-cov --all-features --html -q
+        echo ""
+        echo "✅ Coverage report: target/llvm-cov/html/index.html"
+      fi
+
+  # Full CI pipeline
+  ci:
+    help: "Full CI pipeline (lint + check + test in parallel)"
+    before: [lint, check, test]
+    bash: |
+      echo "✅ All CI checks passed!"
+
+  # Build release binary
+  build:
+    help: "Build release binary"
+    bash: |
+      cargo build --release
+      echo "✅ Release build complete"
+
+  # Clean build artifacts
+  clean:
+    help: "Clean build artifacts"
+    bash: |
+      cargo clean
+      echo "✅ Build artifacts cleaned"
+
+  # Install locally
+  install:
+    help: "Install binary locally via cargo"
+    bash: |
+      cargo install --path .
+      echo "✅ Binary installed to ~/.cargo/bin"
+
+"#;
+
+    fs::write(target_dir.join(".otto.yml"), otto_yml).context("Failed to write .otto.yml")?;
 
     Ok(())
 }
