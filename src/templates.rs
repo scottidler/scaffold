@@ -1,4 +1,5 @@
 use crate::config::Config;
+use colored::*;
 use eyre::{Context, Result};
 use std::fs;
 use std::path::Path;
@@ -28,7 +29,7 @@ pub fn generate_project(
     // Generate sample config file
     generate_sample_config(project_name, target_dir)?;
 
-    println!("✓ Generated all project files");
+    println!("{} Generated all project files", "✓".green());
     Ok(())
 }
 

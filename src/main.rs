@@ -40,6 +40,46 @@ fn setup_logging() -> Result<()> {
     Ok(())
 }
 
+/// Check if a directory looks like a fresh cloned repo (only contains typical repo files)
+fn is_scaffoldable_directory(dir: &std::path::Path) -> Result<bool> {
+    const ALLOWED_FILES: &[&str] = &[
+        ".git",
+        ".gitignore",
+        ".gitattributes",
+        ".github",
+        ".editorconfig",
+        ".vscode",
+        "README",
+        "README.md",
+        "README.txt",
+        "LICENSE",
+        "LICENSE.md",
+        "LICENSE.txt",
+        "LICENSE-MIT",
+        "LICENSE-APACHE",
+        "CODEOWNERS",
+        "CONTRIBUTING",
+        "CONTRIBUTING.md",
+        "CODE_OF_CONDUCT",
+        "CODE_OF_CONDUCT.md",
+        "SECURITY",
+        "SECURITY.md",
+    ];
+
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let file_name = entry.file_name();
+        let name = file_name.to_string_lossy();
+
+        if !ALLOWED_FILES.iter().any(|&allowed| name.eq_ignore_ascii_case(allowed)) {
+            info!("Directory contains non-repo file: {}, blocking scaffold", name);
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
+}
+
 fn create_project(cli: &Cli, config: &Config) -> Result<()> {
     let project = &cli.project;
     let default_dir = PathBuf::from(project);
@@ -64,16 +104,18 @@ fn create_project(cli: &Cli, config: &Config) -> Result<()> {
     info!("Creating project: {}", project);
     println!("{} Creating project: {}", "✓".green(), project.cyan());
 
-    if target_dir.exists() && target_dir.read_dir()?.next().is_some() {
-        return Err(eyre::eyre!(
-            "Directory {} already exists and is not empty",
-            target_dir.display()
-        ));
+    if target_dir.exists() {
+        if !is_scaffoldable_directory(target_dir)? {
+            return Err(eyre::eyre!(
+                "Directory {} already exists and contains non-repo files",
+                target_dir.display()
+            ));
+        }
+        println!("{} Using existing directory: {}", "✓".green(), target_dir.display());
+    } else {
+        fs::create_dir_all(target_dir).context("Failed to create project directory")?;
+        println!("{} Created directory: {}", "✓".green(), target_dir.display());
     }
-
-    fs::create_dir_all(target_dir).context("Failed to create project directory")?;
-
-    println!("{} Created directory: {}", "✓".green(), target_dir.display());
 
     templates::generate_project(
         project,
@@ -104,6 +146,13 @@ fn create_project(cli: &Cli, config: &Config) -> Result<()> {
 }
 
 fn init_git_repo(target_dir: &PathBuf) -> Result<()> {
+    // Skip if .git already exists (e.g., cloned repo)
+    if target_dir.join(".git").exists() {
+        info!("Git repository already exists, skipping init");
+        println!("{} Git repository already exists", "✓".green());
+        return Ok(());
+    }
+
     info!("Initializing git repository");
     let output = Command::new("git")
         .args(["init"])
@@ -305,7 +354,7 @@ mod tests {
     }
 
     #[test]
-    fn test_create_project_fails_on_non_empty_directory() {
+    fn test_create_project_fails_on_directory_with_non_repo_files() {
         let temp_dir = TempDir::new().unwrap();
         let project_dir = temp_dir.path().join("test-project");
         fs::create_dir_all(&project_dir).unwrap();
@@ -317,12 +366,49 @@ mod tests {
 
         let result = create_project(&cli, &config);
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("already exists and is not empty")
-        );
+        assert!(result.unwrap_err().to_string().contains("contains non-repo files"));
+    }
+
+    #[test]
+    fn test_create_project_succeeds_on_directory_with_repo_files_only() {
+        let temp_dir = TempDir::new().unwrap();
+        let project_dir = temp_dir.path().join("test-project-repo");
+        fs::create_dir_all(&project_dir).unwrap();
+        fs::write(project_dir.join("README.md"), "# Test").unwrap();
+        fs::write(project_dir.join("LICENSE"), "MIT").unwrap();
+        fs::write(project_dir.join(".gitignore"), "/target").unwrap();
+
+        let mut cli = create_test_cli("test-project-repo");
+        cli.directory = Some(project_dir.clone());
+        let config = create_test_config();
+
+        let result = create_project(&cli, &config);
+        assert!(result.is_ok());
+        assert!(project_dir.join("Cargo.toml").exists());
+        assert!(project_dir.join("src").exists());
+        // Original files should still exist
+        assert!(project_dir.join("README.md").exists());
+        assert!(project_dir.join("LICENSE").exists());
+        assert!(project_dir.join(".gitignore").exists());
+    }
+
+    #[test]
+    fn test_create_project_succeeds_on_directory_with_git_folder() {
+        let temp_dir = TempDir::new().unwrap();
+        let project_dir = temp_dir.path().join("test-project-git");
+        fs::create_dir_all(project_dir.join(".git")).unwrap();
+        fs::write(project_dir.join("README.md"), "# Test").unwrap();
+
+        let mut cli = create_test_cli("test-project-git");
+        cli.directory = Some(project_dir.clone());
+        cli.no_git = false; // Enable git to test skipping
+        let config = create_test_config();
+
+        let result = create_project(&cli, &config);
+        assert!(result.is_ok());
+        assert!(project_dir.join("Cargo.toml").exists());
+        // .git should still exist (not re-initialized)
+        assert!(project_dir.join(".git").exists());
     }
 
     #[test]
