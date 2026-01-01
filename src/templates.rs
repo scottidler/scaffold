@@ -90,7 +90,7 @@ use std::process::Command;
 
 fn main() {
     let git_describe = Command::new("git")
-        .args(&["describe", "--tags", "--always"])
+        .args(["describe", "--tags", "--always"])
         .output()
         .and_then(|output| {
             if output.status.success() {
