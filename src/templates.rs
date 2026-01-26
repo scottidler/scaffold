@@ -96,7 +96,7 @@ fn main() {
             if output.status.success() {
                 Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
             } else {
-                Err(std::io::Error::new(std::io::ErrorKind::Other, "git describe failed"))
+                Err(std::io::Error::other("git describe failed"))
             }
         })
         .unwrap_or_else(|_| {
@@ -137,17 +137,18 @@ fn setup_logging() -> Result<()> {{
         .join("{}")
         .join("logs");
 
-    fs::create_dir_all(&log_dir)
-        .context("Failed to create log directory")?;
+    fs::create_dir_all(&log_dir).context("Failed to create log directory")?;
 
     let log_file = log_dir.join("{}.log");
 
     // Setup env_logger with file output
-    let target = Box::new(fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_file)
-        .context("Failed to open log file")?);
+    let target = Box::new(
+        fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_file)
+            .context("Failed to open log file")?,
+    );
 
     env_logger::Builder::from_default_env()
         .target(env_logger::Target::Pipe(target))
@@ -179,21 +180,18 @@ fn run_application(_cli: &Cli, config: &Config) -> Result<()> {{
 
 fn main() -> Result<()> {{
     // Setup logging first
-    setup_logging()
-        .context("Failed to setup logging")?;
+    setup_logging().context("Failed to setup logging")?;
 
     // Parse CLI arguments
     let cli = Cli::parse();
 
     // Load configuration
-    let config = Config::load(cli.config.as_ref())
-        .context("Failed to load configuration")?;
+    let config = Config::load(cli.config.as_ref()).context("Failed to load configuration")?;
 
     info!("Starting with config from: {{:?}}", cli.config);
 
     // Run the main application logic
-    run_application(&cli, &config)
-        .context("Application failed")?;
+    run_application(&cli, &config).context("Application failed")?;
 
     Ok(())
 }}
@@ -265,8 +263,7 @@ impl Config {
     pub fn load(config_path: Option<&PathBuf>) -> Result<Self> {
         // If explicit config path provided, try to load it
         if let Some(path) = config_path {
-            return Self::load_from_file(path)
-                .context(format!("Failed to load config from {}", path.display()));
+            return Self::load_from_file(path).context(format!("Failed to load config from {}", path.display()));
         }
 
         // Try primary location: ~/.config/<project>/<project>.yml
@@ -301,17 +298,13 @@ impl Config {
     }
 
     fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let content = fs::read_to_string(&path)
-            .context("Failed to read config file")?;
+        let content = fs::read_to_string(&path).context("Failed to read config file")?;
 
-        let config: Self = serde_yaml::from_str(&content)
-            .context("Failed to parse config file")?;
+        let config: Self = serde_yaml::from_str(&content).context("Failed to parse config file")?;
 
         log::info!("Loaded config from: {}", path.as_ref().display());
         Ok(config)
     }
-
-
 }
 "#;
 
