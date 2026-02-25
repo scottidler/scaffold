@@ -107,10 +107,18 @@ fn create_project(cli: &Cli, config: &Config) -> Result<()> {
 
     if target_dir.exists() {
         if !is_scaffoldable_directory(target_dir)? {
-            return Err(eyre::eyre!(
-                "Directory {} already exists and contains non-repo files",
-                target_dir.display()
-            ));
+            if cli.force {
+                warn!("Directory contains non-repo files, proceeding due to --force");
+                println!(
+                    "{} Directory contains non-repo files, proceeding due to --force",
+                    "⚠".yellow()
+                );
+            } else {
+                return Err(eyre::eyre!(
+                    "Directory {} already exists and contains non-repo files (use --force to override)",
+                    target_dir.display()
+                ));
+            }
         }
         println!("{} Using existing directory: {}", "✓".green(), target_dir.display());
     } else {
@@ -124,6 +132,7 @@ fn create_project(cli: &Cli, config: &Config) -> Result<()> {
         cli.author.as_ref().unwrap_or(&config.default_author),
         config,
         cli.no_deps,
+        cli.force,
     )?;
 
     if !cli.no_git && config.create_git_repo {
@@ -245,6 +254,7 @@ mod tests {
             author: Some("Test Author <test@example.com>".to_string()),
             directory: None,
             config: None,
+            force: false,
             no_git: true,
             no_sample_config: false,
             no_verify: true,
@@ -263,6 +273,7 @@ mod tests {
             author: None,
             directory: None,
             config: None,
+            force: false,
             no_git: true,
             no_sample_config: false,
             no_verify: true,
@@ -282,6 +293,7 @@ mod tests {
             author: None,
             directory: None,
             config: None,
+            force: false,
             no_git: true,
             no_sample_config: false,
             no_verify: true,
@@ -301,6 +313,7 @@ mod tests {
             author: None,
             directory: None,
             config: None,
+            force: false,
             no_git: true,
             no_sample_config: false,
             no_verify: true,
@@ -320,6 +333,7 @@ mod tests {
             author: None,
             directory: None,
             config: None,
+            force: false,
             no_git: true,
             no_sample_config: false,
             no_verify: true,

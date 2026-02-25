@@ -24,6 +24,10 @@ pub struct Cli {
     #[arg(short, long, help = "Path to config file")]
     pub config: Option<PathBuf>,
 
+    /// Force scaffold even if directory contains non-repo files
+    #[arg(short, long, help = "Force scaffold even if directory contains non-repo files")]
+    pub force: bool,
+
     /// Don't initialize git repository
     #[arg(long, help = "Don't initialize git repository")]
     pub no_git: bool,
