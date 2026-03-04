@@ -132,7 +132,11 @@ fn main() {
 
 fn generate_main_rs(project_name: &str, src_dir: &Path, force: bool) -> Result<()> {
     let main_rs = format!(
-        r#"use clap::Parser;
+        r#"#![deny(clippy::unwrap_used)]
+#![deny(dead_code)]
+#![deny(unused_variables)]
+
+use clap::Parser;
 use colored::*;
 use eyre::{{Context, Result}};
 use log::info;
@@ -173,11 +177,14 @@ fn setup_logging() -> Result<()> {{
     Ok(())
 }}
 
-fn run_application(_cli: &Cli, config: &Config) -> Result<()> {{
+fn run_application(cli: &Cli, config: &Config) -> Result<()> {{
     info!("Starting application");
 
     // Load and display configuration
     println!("{{}}", "✓ Configuration loaded successfully".green());
+    if cli.verbose {{
+        println!("{{}}", "🔍 Verbose mode enabled".yellow());
+    }}
     if config.debug {{
         println!("{{}}", "🔍 Debug mode enabled".yellow());
     }}
@@ -343,7 +350,7 @@ debug: false
     Ok(())
 }
 
-fn generate_otto_yml(_project_name: &str, target_dir: &Path, force: bool) -> Result<()> {
+fn generate_otto_yml(_: &str, target_dir: &Path, force: bool) -> Result<()> {
     let otto_yml = r#"otto:
   api: 1
   tasks: [ci]
@@ -351,11 +358,20 @@ fn generate_otto_yml(_project_name: &str, target_dir: &Path, force: bool) -> Res
     VERSION: "$(git describe --tags --always --dirty 2>/dev/null || echo 'dev')"
 
 tasks:
-  # Whitespace linting
+  # Whitespace and convention linting
   lint:
-    help: "Run whitespace linting"
+    help: "Run whitespace and convention linting"
     bash: |
       whitespace -r
+      echo ""
+      echo "=== Deny _variable binding pattern ==="
+      if grep -rn --include='*.rs' -P '(\blet\s+(mut\s+)?|[(,]\s*|\|\s*|\bfor\s+)_[a-zA-Z]' src/; then
+        echo ""
+        echo "❌ Found _variable binding pattern."
+        echo "   Use _ to discard or use the variable — never _varname."
+        exit 1
+      fi
+      echo "✅ No _variable patterns found"
 
   # Code quality checks
   check:
@@ -440,6 +456,7 @@ tasks:
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use std::fs;

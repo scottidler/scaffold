@@ -5,11 +5,20 @@ otto:
     VERSION: "$(git describe --tags --always --dirty 2>/dev/null || echo 'dev')"
 
 tasks:
-  # Whitespace linting
+  # Whitespace and convention linting
   lint:
-    help: "Run whitespace linting"
+    help: "Run whitespace and convention linting"
     bash: |
       whitespace -r
+      echo ""
+      echo "=== Deny _variable binding pattern ==="
+      if grep -rn --include='*.rs' -P '(\blet\s+(mut\s+)?|[(,]\s*|\|\s*|\bfor\s+)_[a-zA-Z]' src/; then
+        echo ""
+        echo "❌ Found _variable binding pattern."
+        echo "   Use _ to discard or use the variable — never _varname."
+        exit 1
+      fi
+      echo "✅ No _variable patterns found"
 
   # Code quality checks
   check:
