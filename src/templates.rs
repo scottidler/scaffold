@@ -43,6 +43,9 @@ pub fn generate_project(
     // Generate sample config file
     generate_sample_config(project_name, target_dir, force)?;
 
+    // Generate clippy.toml for lint config
+    generate_clippy_toml(target_dir, force)?;
+
     // Generate .otto.yml for CI
     generate_otto_yml(project_name, target_dir, force)?;
 
@@ -346,6 +349,15 @@ debug: false
     );
 
     write_if_not_exists(&target_dir.join(format!("{}.yml", project_name)), &sample_config, force)?;
+
+    Ok(())
+}
+
+fn generate_clippy_toml(target_dir: &Path, force: bool) -> Result<()> {
+    let clippy_toml = r#"too-many-arguments-threshold = 12
+"#;
+
+    write_if_not_exists(&target_dir.join("clippy.toml"), clippy_toml, force)?;
 
     Ok(())
 }
