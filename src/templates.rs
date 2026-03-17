@@ -265,8 +265,9 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+// YAML keys use kebab-case (e.g., my-field); serde translates to snake_case in Rust.
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(default)]
+#[serde(default, rename_all = "kebab-case")]
 pub struct Config {
     pub name: String,
     pub age: u32,
@@ -341,7 +342,8 @@ impl Config {
 fn generate_sample_config(project_name: &str, target_dir: &Path, force: bool) -> Result<()> {
     let sample_config = format!(
         r#"# {}.yml - Sample configuration file
-name: "John Doe"
+# YAML keys use kebab-case; serde translates to snake_case in Rust.
+name: John Doe
 age: 30
 debug: false
 "#,
@@ -715,6 +717,7 @@ mod tests {
         let config_rs = fs::read_to_string(src_dir.join("config.rs")).unwrap();
 
         assert!(config_rs.contains("use serde::{Deserialize, Serialize}"));
+        assert!(config_rs.contains("rename_all = \"kebab-case\""));
         assert!(config_rs.contains("pub struct Config"));
         assert!(config_rs.contains("pub name: String"));
         assert!(config_rs.contains("pub age: u32"));
@@ -739,7 +742,7 @@ mod tests {
         let config_content = fs::read_to_string(&config_file).unwrap();
 
         assert!(config_content.contains(project_name));
-        assert!(config_content.contains("name: \"John Doe\""));
+        assert!(config_content.contains("name: John Doe"));
         assert!(config_content.contains("age: 30"));
         assert!(config_content.contains("debug: false"));
         assert!(config_content.contains("Sample configuration file"));

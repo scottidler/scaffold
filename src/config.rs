@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(default)]
+#[serde(default, rename_all = "kebab-case")]
 pub struct Config {
     pub default_author: String,
     pub default_license: String,
@@ -16,7 +16,7 @@ pub struct Config {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(default)]
+#[serde(default, rename_all = "kebab-case")]
 pub struct TemplateConfig {
     pub create_build_rs: bool,
     pub create_cli_module: bool,
@@ -34,7 +34,7 @@ pub struct Dependency {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(default)]
+#[serde(default, rename_all = "kebab-case")]
 pub struct CliConfig {
     pub after_help: String,
 }
@@ -272,20 +272,20 @@ mod tests {
         let config_file = temp_dir.path().join("test.yml");
 
         let config_content = r#"
-default_author: "Test Author <test@example.com>"
-default_license: "Apache-2.0"
-create_git_repo: false
-create_sample_config: false
+default-author: "Test Author <test@example.com>"
+default-license: "Apache-2.0"
+create-git-repo: false
+create-sample-config: false
 debug: true
 template:
-  create_build_rs: false
+  create-build-rs: false
   dependencies:
     - name: "custom-dep"
       features: ["feature1", "feature2"]
-  sample_config:
+  sample-config:
     custom_field: "custom_value"
   cli:
-    after_help: "Custom help text"
+    after-help: "Custom help text"
 "#;
 
         fs::write(&config_file, config_content).unwrap();
