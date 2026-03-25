@@ -46,6 +46,9 @@ pub fn generate_project(
     // Generate clippy.toml for lint config
     generate_clippy_toml(target_dir, force)?;
 
+    // Generate GitHub Actions workflows
+    generate_github_workflows(project_name, target_dir, force)?;
+
     // Generate .otto.yml for CI
     generate_otto_yml(project_name, target_dir, force)?;
 
@@ -364,6 +367,251 @@ fn generate_clippy_toml(target_dir: &Path, force: bool) -> Result<()> {
     Ok(())
 }
 
+fn generate_github_workflows(project_name: &str, target_dir: &Path, force: bool) -> Result<()> {
+    let workflows_dir = target_dir.join(".github").join("workflows");
+    fs::create_dir_all(&workflows_dir).context("Failed to create .github/workflows directory")?;
+
+    generate_github_ci_yml(&workflows_dir, force)?;
+    generate_github_release_yml(project_name, &workflows_dir, force)?;
+
+    Ok(())
+}
+
+fn generate_github_ci_yml(workflows_dir: &Path, force: bool) -> Result<()> {
+    let ci_yml = r#"name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  RUST_VERSION: 1.94.0
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ env.RUST_VERSION }}
+        components: rustfmt, clippy
+
+    - name: Cache Rust dependencies
+      uses: Swatinem/rust-cache@v2
+      with:
+        prefix-key: "v1-rust"
+
+    - name: Run tests
+      run: cargo test --verbose
+
+    - name: Check formatting
+      run: cargo fmt --check
+
+    - name: Run clippy
+      run: cargo clippy -- -D warnings
+
+  build:
+    name: Build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+          - os: macos-14  # Apple Silicon ARM
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ env.RUST_VERSION }}
+
+    - name: Cache Rust dependencies
+      uses: Swatinem/rust-cache@v2
+      with:
+        prefix-key: "v1-rust"
+        shared-key: ${{ matrix.os }}
+
+    - name: Build
+      run: cargo build --release --verbose
+"#;
+
+    write_if_not_exists(&workflows_dir.join("ci.yml"), ci_yml, force)?;
+
+    Ok(())
+}
+
+fn generate_github_release_yml(project_name: &str, workflows_dir: &Path, force: bool) -> Result<()> {
+    let release_yml = r#"name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  RUST_VERSION: 1.94.0
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    container: debian:bookworm
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            suffix: linux-amd64
+            cross: false
+          - target: aarch64-unknown-linux-gnu
+            suffix: linux-arm64
+            cross: true
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y curl build-essential git pkg-config libssl-dev
+
+      - name: Install cross-compilation toolchain
+        if: matrix.cross
+        run: apt-get install -y gcc-aarch64-linux-gnu
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Mark workspace as safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Set GIT_DESCRIBE environment variable
+        run: |
+          GIT_DESCRIBE=$(git describe --tags --dirty --always)
+          echo "GIT_DESCRIBE=$GIT_DESCRIBE" >> $GITHUB_ENV
+
+      - name: Set up Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain ${{ env.RUST_VERSION }}
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          . "$HOME/.cargo/env"
+          rustup target add ${{ matrix.target }}
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: ${{ matrix.target }}
+
+      - name: Build for ${{ matrix.target }}
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.cross && 'aarch64-linux-gnu-gcc' || '' }}
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package binary
+        run: |
+          mkdir -p artifacts/
+          cp target/${{ matrix.target }}/release/{{PROJECT}} artifacts/
+
+      - name: Archive artifacts
+        run: tar -czvf {{PROJECT}}-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz -C artifacts {{PROJECT}}
+
+      - name: Generate checksum
+        run: sha256sum {{PROJECT}}-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz > {{PROJECT}}-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz.sha256
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: {{PROJECT}}-${{ matrix.suffix }}
+          path: |
+            {{PROJECT}}-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz
+            {{PROJECT}}-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz.sha256
+
+  build-macos:
+    runs-on: macos-14
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            suffix: macos-x86_64
+          - target: aarch64-apple-darwin
+            suffix: macos-arm64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set GIT_DESCRIBE environment variable
+        run: |
+          GIT_DESCRIBE=$(git describe --tags --dirty --always)
+          echo "GIT_DESCRIBE=$GIT_DESCRIBE" >> $GITHUB_ENV
+
+      - name: Set up Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain ${{ env.RUST_VERSION }}
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          rustup target add ${{ matrix.target }}
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v1-rust"
+          shared-key: ${{ matrix.target }}
+
+      - name: Build for ${{ matrix.target }}
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package binary
+        run: |
+          mkdir -p artifacts/
+          cp target/${{ matrix.target }}/release/{{PROJECT}} artifacts/
+
+      - name: Archive artifacts
+        run: tar -czvf {{PROJECT}}-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz -C artifacts {{PROJECT}}
+
+      - name: Generate checksum
+        run: shasum -a 256 {{PROJECT}}-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz > {{PROJECT}}-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz.sha256
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: {{PROJECT}}-${{ matrix.suffix }}
+          path: |
+            {{PROJECT}}-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz
+            {{PROJECT}}-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz.sha256
+
+  create-release:
+    needs: [build-linux, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: 'artifacts/**'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+"#
+    .replace("{{PROJECT}}", project_name);
+
+    write_if_not_exists(&workflows_dir.join("release.yml"), &release_yml, force)?;
+
+    Ok(())
+}
+
 fn generate_otto_yml(_: &str, target_dir: &Path, force: bool) -> Result<()> {
     let otto_yml = r#"otto:
   api: 1
@@ -584,6 +832,8 @@ mod tests {
         assert!(temp_dir.path().join("src/cli.rs").exists());
         assert!(temp_dir.path().join("src/config.rs").exists());
         assert!(temp_dir.path().join(format!("{}.yml", project_name)).exists());
+        assert!(temp_dir.path().join(".github/workflows/ci.yml").exists());
+        assert!(temp_dir.path().join(".github/workflows/release.yml").exists());
     }
 
     #[test]
@@ -795,6 +1045,67 @@ mod tests {
             let sample_config = project_dir.join(format!("{}.yml", project_name));
             assert!(sample_config.exists());
         }
+    }
+
+    #[test]
+    fn test_generate_github_ci_yml() {
+        let temp_dir = TempDir::new().unwrap();
+        let workflows_dir = temp_dir.path().join(".github").join("workflows");
+        fs::create_dir_all(&workflows_dir).unwrap();
+
+        let result = generate_github_ci_yml(&workflows_dir, false);
+        assert!(result.is_ok());
+
+        let ci_yml = fs::read_to_string(workflows_dir.join("ci.yml")).unwrap();
+
+        assert!(ci_yml.contains("name: CI"));
+        assert!(ci_yml.contains("branches: [main]"));
+        assert!(ci_yml.contains("RUST_VERSION: 1.94.0"));
+        assert!(ci_yml.contains("cargo test --verbose"));
+        assert!(ci_yml.contains("cargo fmt --check"));
+        assert!(ci_yml.contains("cargo clippy -- -D warnings"));
+        assert!(ci_yml.contains("macos-14"));
+        assert!(ci_yml.contains("cargo build --release --verbose"));
+    }
+
+    #[test]
+    fn test_generate_github_release_yml() {
+        let temp_dir = TempDir::new().unwrap();
+        let workflows_dir = temp_dir.path().join(".github").join("workflows");
+        fs::create_dir_all(&workflows_dir).unwrap();
+        let project_name = "test-release";
+
+        let result = generate_github_release_yml(project_name, &workflows_dir, false);
+        assert!(result.is_ok());
+
+        let release_yml = fs::read_to_string(workflows_dir.join("release.yml")).unwrap();
+
+        assert!(release_yml.contains("name: Release"));
+        assert!(release_yml.contains("- 'v*'"));
+        assert!(release_yml.contains("contents: write"));
+        assert!(release_yml.contains("x86_64-unknown-linux-gnu"));
+        assert!(release_yml.contains("aarch64-unknown-linux-gnu"));
+        assert!(release_yml.contains("x86_64-apple-darwin"));
+        assert!(release_yml.contains("aarch64-apple-darwin"));
+        assert!(release_yml.contains("softprops/action-gh-release@v2"));
+        // Verify project name was substituted
+        assert!(release_yml.contains("test-release"));
+        assert!(!release_yml.contains("{{PROJECT}}"));
+        // Verify no Docker job
+        assert!(!release_yml.contains("docker"));
+        assert!(!release_yml.contains("Dockerfile"));
+    }
+
+    #[test]
+    fn test_generate_github_workflows() {
+        let temp_dir = TempDir::new().unwrap();
+        let project_name = "test-workflows";
+
+        let result = generate_github_workflows(project_name, temp_dir.path(), false);
+        assert!(result.is_ok());
+
+        assert!(temp_dir.path().join(".github/workflows/ci.yml").exists());
+        assert!(temp_dir.path().join(".github/workflows/release.yml").exists());
     }
 
     #[test]
