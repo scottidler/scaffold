@@ -394,7 +394,7 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Install Rust
       uses: dtolnay/rust-toolchain@master
@@ -425,7 +425,7 @@ jobs:
           - os: ubuntu-latest
           - os: macos-14  # Apple Silicon ARM
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Install Rust
       uses: dtolnay/rust-toolchain@master
@@ -485,7 +485,7 @@ jobs:
         if: matrix.cross
         run: apt-get install -y gcc-aarch64-linux-gnu
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -528,7 +528,7 @@ jobs:
         run: sha256sum {{PROJECT}}-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz > {{PROJECT}}-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz.sha256
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: {{PROJECT}}-${{ matrix.suffix }}
           path: |
@@ -545,7 +545,7 @@ jobs:
           - target: aarch64-apple-darwin
             suffix: macos-arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -582,7 +582,7 @@ jobs:
         run: shasum -a 256 {{PROJECT}}-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz > {{PROJECT}}-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz.sha256
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: {{PROJECT}}-${{ matrix.suffix }}
           path: |
@@ -594,7 +594,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts/
 
