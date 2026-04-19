@@ -635,6 +635,35 @@ tasks:
       fi
       echo "✅ No _variable patterns found"
 
+  # Fail if any source file exceeds BLOAT_MAX_LINES (default 1500)
+  bloat:
+    help: "Fail if any source file exceeds BLOAT_MAX_LINES (default 1500)"
+    bash: |
+      LIMIT="${BLOAT_MAX_LINES:-1500}"
+      FAILED=0
+      echo "=== Checking file line counts (limit: $LIMIT) ==="
+      while IFS= read -r file; do
+        lines=$(wc -l < "$file")
+        if [ "$lines" -gt "$LIMIT" ]; then
+          delta=$((lines - LIMIT))
+          echo "  FAIL: $file ($lines lines, +$delta over limit)"
+          FAILED=1
+        fi
+      done < <(find . -type f \( -name "*.rs" -o -name "*.py" -o -name "*.js" -o -name "*.ts" \) \
+        -not -path "*/target/*" \
+        -not -path "*/node_modules/*" \
+        -not -path "*/.venv/*" \
+        -not -path "*/__pycache__/*" \
+        -not -path "*/dist/*" \
+        -not -path "*/build/*" \
+        -not -path "*/.git/*")
+      if [ "$FAILED" -eq 1 ]; then
+        echo ""
+        echo "Decompose these files into modules before proceeding."
+        exit 1
+      fi
+      echo "All files within $LIMIT line limit"
+
   # Code quality checks
   check:
     help: "Run all quality checks (compile, clippy, format)"
@@ -770,8 +799,8 @@ tasks:
 
   # Full CI pipeline
   ci:
-    help: "Full CI pipeline (lint + check + test in parallel)"
-    before: [lint, check, test]
+    help: "Full CI pipeline (lint + bloat + check + test)"
+    before: [lint, bloat, check, test]
     bash: |
       echo "✅ All CI checks passed!"
 
