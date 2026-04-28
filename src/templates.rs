@@ -52,6 +52,9 @@ pub fn generate_project(
     // Generate .otto.yml for CI
     generate_otto_yml(project_name, target_dir, force)?;
 
+    // Generate .pre-commit-config.yaml
+    generate_pre_commit_config(target_dir, force)?;
+
     println!("{} Generated all project files", "✓".green());
     Ok(())
 }
@@ -811,6 +814,13 @@ tasks:
       cargo build --release
       echo "✅ Release build complete"
 
+  # Wire up git hooks via pre-commit (run once after cloning)
+  setup:
+    help: "Install pre-commit hooks"
+    bash: |
+      pre-commit install
+      echo "✅ pre-commit hooks installed"
+
   # Clean build artifacts
   clean:
     help: "Clean build artifacts"
@@ -824,10 +834,31 @@ tasks:
     bash: |
       cargo install --path .
       echo "✅ Binary installed to ~/.cargo/bin"
-
 "#;
 
     write_if_not_exists(&target_dir.join(".otto.yml"), otto_yml, force)?;
+
+    Ok(())
+}
+
+fn generate_pre_commit_config(target_dir: &Path, force: bool) -> Result<()> {
+    let config = r#"repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-yaml
+  - repo: https://github.com/doublify/pre-commit-rust
+    rev: v1.0
+    hooks:
+      - id: fmt
+      - id: clippy
+        args: ["--all-targets", "--all-features", "--", "-D", "warnings"]
+"#;
+
+    write_if_not_exists(&target_dir.join(".pre-commit-config.yaml"), config, force)?;
 
     Ok(())
 }
@@ -863,6 +894,7 @@ mod tests {
         assert!(temp_dir.path().join(format!("{}.yml", project_name)).exists());
         assert!(temp_dir.path().join(".github/workflows/ci.yml").exists());
         assert!(temp_dir.path().join(".github/workflows/release.yml").exists());
+        assert!(temp_dir.path().join(".pre-commit-config.yaml").exists());
     }
 
     #[test]
