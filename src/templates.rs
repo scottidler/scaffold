@@ -47,6 +47,9 @@ pub fn generate_project(
     // Generate clippy.toml for lint config
     generate_clippy_toml(target_dir, force)?;
 
+    // Generate rustfmt.toml for formatting config
+    generate_rustfmt_toml(target_dir, force)?;
+
     // Generate GitHub Actions workflows
     generate_github_workflows(project_name, target_dir, force)?;
 
@@ -436,6 +439,15 @@ fn generate_clippy_toml(target_dir: &Path, force: bool) -> Result<()> {
 "#;
 
     write_if_not_exists(&target_dir.join("clippy.toml"), clippy_toml, force)?;
+
+    Ok(())
+}
+
+fn generate_rustfmt_toml(target_dir: &Path, force: bool) -> Result<()> {
+    let rustfmt_toml = r#"max_width = 120
+"#;
+
+    write_if_not_exists(&target_dir.join("rustfmt.toml"), rustfmt_toml, force)?;
 
     Ok(())
 }
