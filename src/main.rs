@@ -92,12 +92,19 @@ fn is_scaffoldable_directory(dir: &std::path::Path) -> Result<bool> {
 /// - `scaffold --directory /path/bar`   -> ("bar", "/path/bar")
 /// - `scaffold foo --directory /tmp/x`  -> ("foo", "/tmp/x")
 fn resolve_project_and_dir(cli: &Cli) -> Result<(String, PathBuf)> {
-    let cwd = std::env::current_dir().context("Failed to get current directory")?;
+    // Only read cwd when we actually need it (no positional and no --directory).
+    // Reading it unconditionally creates a race with tests that mutate cwd.
+    let cwd_needed = cli.project.is_none() && cli.directory.is_none();
+    let cwd = if cwd_needed {
+        Some(std::env::current_dir().context("Failed to get current directory")?)
+    } else {
+        None
+    };
 
     let target_dir = match (cli.directory.as_ref(), cli.project.as_ref()) {
         (Some(dir), _) => dir.clone(),
         (None, Some(project)) => PathBuf::from(project),
-        (None, None) => cwd.clone(),
+        (None, None) => cwd.clone().expect("cwd was computed above when both inputs are absent"),
     };
 
     let project = match cli.project.as_ref() {
@@ -106,6 +113,7 @@ fn resolve_project_and_dir(cli: &Cli) -> Result<(String, PathBuf)> {
             let absolute = if target_dir.is_absolute() {
                 target_dir.clone()
             } else {
+                let cwd = std::env::current_dir().context("Failed to get current directory")?;
                 cwd.join(&target_dir)
             };
             absolute
@@ -491,6 +499,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(cwd)]
     fn test_create_project_uses_default_directory() {
         let temp_dir = TempDir::new().unwrap();
         let original_dir = std::env::current_dir().unwrap();
@@ -542,6 +551,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(cwd)]
     fn test_create_project_derives_name_from_cwd_when_unspecified() {
         let temp_dir = TempDir::new().unwrap();
         let project_dir = temp_dir.path().join("from-cwd");
@@ -579,5 +589,98 @@ mod tests {
         assert!(result.is_ok());
         let cargo_toml = fs::read_to_string(project_dir.join("Cargo.toml")).unwrap();
         assert!(cargo_toml.contains("name = \"from-flag\""));
+    }
+
+    #[test]
+    fn test_create_project_emits_lib_rs_and_tests_rs() {
+        let temp_dir = TempDir::new().unwrap();
+        let project_dir = temp_dir.path().join("test-lib-bin");
+
+        let mut cli = create_test_cli("test-lib-bin");
+        cli.directory = Some(project_dir.clone());
+        let config = create_test_config();
+
+        create_project(&cli, &config).unwrap();
+
+        assert!(project_dir.join("src/lib.rs").exists(), "src/lib.rs must be generated");
+        assert!(
+            project_dir.join("src/tests.rs").exists(),
+            "src/tests.rs must be generated"
+        );
+        assert!(project_dir.join("src/main.rs").exists());
+        assert!(project_dir.join("src/cli.rs").exists());
+        assert!(project_dir.join("src/config.rs").exists());
+    }
+
+    #[test]
+    fn test_generated_main_uses_library() {
+        let temp_dir = TempDir::new().unwrap();
+        let project_dir = temp_dir.path().join("test-uses-lib");
+
+        let mut cli = create_test_cli("test-uses-lib");
+        cli.directory = Some(project_dir.clone());
+        let config = create_test_config();
+
+        create_project(&cli, &config).unwrap();
+
+        let main_rs = fs::read_to_string(project_dir.join("src/main.rs")).unwrap();
+        assert!(
+            main_rs.contains("use test_uses_lib::{Config, run};"),
+            "generated main.rs must import Config and run from the library crate"
+        );
+        assert!(main_rs.contains("mod cli;"), "generated main.rs still declares mod cli");
+        assert!(
+            !main_rs.contains("mod config;"),
+            "generated main.rs must not declare mod config (moved to lib.rs)"
+        );
+        assert!(
+            !main_rs.contains("fn run_application"),
+            "generated main.rs must not contain run_application (moved to lib::run)"
+        );
+    }
+
+    #[test]
+    fn test_generated_main_translates_hyphens() {
+        let temp_dir = TempDir::new().unwrap();
+        let project_dir = temp_dir.path().join("foo-bar");
+
+        let mut cli = create_test_cli("foo-bar");
+        cli.directory = Some(project_dir.clone());
+        let config = create_test_config();
+
+        create_project(&cli, &config).unwrap();
+
+        let main_rs = fs::read_to_string(project_dir.join("src/main.rs")).unwrap();
+        assert!(
+            main_rs.contains("use foo_bar::{Config, run};"),
+            "hyphens in package name must translate to underscores in the use statement"
+        );
+        assert!(
+            !main_rs.contains("use foo-bar::"),
+            "hyphenated form must not appear in the use statement (would not compile)"
+        );
+    }
+
+    #[test]
+    fn test_create_project_rejects_leading_digit_name() {
+        let cli = Cli {
+            project: Some("1pass".to_string()),
+            author: None,
+            directory: None,
+            config: None,
+            force: false,
+            no_git: true,
+            no_sample_config: false,
+            no_verify: true,
+            no_deps: true,
+        };
+        let config = create_test_config();
+
+        let result = create_project(&cli, &config);
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().to_string().contains("cannot start with a digit"),
+            "leading-digit names must be rejected with a clear error"
+        );
     }
 }
