@@ -9,8 +9,8 @@ use std::path::PathBuf;
     after_help = "Logs are written to: ~/.local/share/scaffold/logs/scaffold.log\n\nThis tool generates complete Rust CLI projects with best practices including:\n- Proper error handling with eyre\n- Structured logging with env_logger\n- Configuration management with serde_yaml\n- Modern CLI parsing with clap\n- Git version integration"
 )]
 pub struct Cli {
-    /// Name of the project to create
-    pub project: String,
+    /// Name of the project to create (default: basename of target directory)
+    pub project: Option<String>,
 
     /// Author name for Cargo.toml
     #[arg(short, long, help = "Author name for Cargo.toml")]
@@ -57,7 +57,7 @@ mod tests {
     #[test]
     fn test_cli_parses_project_name() {
         let cli = Cli::try_parse_from(["scaffold", "my-project"]).unwrap();
-        assert_eq!(cli.project, "my-project");
+        assert_eq!(cli.project, Some("my-project".to_string()));
         assert!(cli.author.is_none());
         assert!(cli.directory.is_none());
         assert!(cli.config.is_none());
@@ -85,7 +85,7 @@ mod tests {
         ])
         .unwrap();
 
-        assert_eq!(cli.project, "test-project");
+        assert_eq!(cli.project, Some("test-project".to_string()));
         assert_eq!(cli.author, Some("Test Author <test@example.com>".to_string()));
         assert_eq!(cli.directory, Some(PathBuf::from("/tmp/test")));
         assert_eq!(cli.config, Some(PathBuf::from("config.yml")));
@@ -109,16 +109,16 @@ mod tests {
         ])
         .unwrap();
 
-        assert_eq!(cli.project, "test-project");
+        assert_eq!(cli.project, Some("test-project".to_string()));
         assert_eq!(cli.author, Some("Short Author".to_string()));
         assert_eq!(cli.directory, Some(PathBuf::from("/tmp/short")));
         assert_eq!(cli.config, Some(PathBuf::from("short.yml")));
     }
 
     #[test]
-    fn test_cli_requires_project_name() {
-        let result = Cli::try_parse_from(["scaffold"]);
-        assert!(result.is_err());
+    fn test_cli_allows_missing_project_name() {
+        let cli = Cli::try_parse_from(["scaffold"]).unwrap();
+        assert!(cli.project.is_none());
     }
 
     #[test]
@@ -134,7 +134,7 @@ mod tests {
 
         for name in valid_names.iter() {
             let cli = Cli::try_parse_from(["scaffold", name]).unwrap();
-            assert_eq!(cli.project, *name);
+            assert_eq!(cli.project, Some((*name).to_string()));
         }
     }
 

@@ -85,10 +85,47 @@ fn is_scaffoldable_directory(dir: &std::path::Path) -> Result<bool> {
     Ok(true)
 }
 
+/// Resolve the project name and target directory from CLI flags, falling back to CWD.
+///
+/// - `scaffold` (no args)               -> (basename(CWD), CWD)
+/// - `scaffold foo`                     -> ("foo", "./foo")
+/// - `scaffold --directory /path/bar`   -> ("bar", "/path/bar")
+/// - `scaffold foo --directory /tmp/x`  -> ("foo", "/tmp/x")
+fn resolve_project_and_dir(cli: &Cli) -> Result<(String, PathBuf)> {
+    let cwd = std::env::current_dir().context("Failed to get current directory")?;
+
+    let target_dir = match (cli.directory.as_ref(), cli.project.as_ref()) {
+        (Some(dir), _) => dir.clone(),
+        (None, Some(project)) => PathBuf::from(project),
+        (None, None) => cwd.clone(),
+    };
+
+    let project = match cli.project.as_ref() {
+        Some(name) => name.clone(),
+        None => {
+            let absolute = if target_dir.is_absolute() {
+                target_dir.clone()
+            } else {
+                cwd.join(&target_dir)
+            };
+            absolute
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|s| s.to_string())
+                .ok_or_else(|| {
+                    eyre::eyre!(
+                        "Could not derive project name from target directory '{}'; pass it explicitly",
+                        target_dir.display()
+                    )
+                })?
+        }
+    };
+
+    Ok((project, target_dir))
+}
+
 fn create_project(cli: &Cli, config: &Config) -> Result<()> {
-    let project = &cli.project;
-    let default_dir = PathBuf::from(project);
-    let target_dir = cli.directory.as_ref().unwrap_or(&default_dir);
+    let (project, target_dir) = resolve_project_and_dir(cli)?;
 
     if project.is_empty() {
         return Err(eyre::eyre!("Project name cannot be empty"));
@@ -110,7 +147,7 @@ fn create_project(cli: &Cli, config: &Config) -> Result<()> {
     println!("{} Creating project: {}", "✓".green(), project.cyan());
 
     if target_dir.exists() {
-        if !is_scaffoldable_directory(target_dir)? {
+        if !is_scaffoldable_directory(&target_dir)? {
             if cli.force {
                 warn!("Directory contains non-repo files, proceeding due to --force");
                 println!(
@@ -126,13 +163,13 @@ fn create_project(cli: &Cli, config: &Config) -> Result<()> {
         }
         println!("{} Using existing directory: {}", "✓".green(), target_dir.display());
     } else {
-        fs::create_dir_all(target_dir).context("Failed to create project directory")?;
+        fs::create_dir_all(&target_dir).context("Failed to create project directory")?;
         println!("{} Created directory: {}", "✓".green(), target_dir.display());
     }
 
     templates::generate_project(
-        project,
-        target_dir,
+        &project,
+        &target_dir,
         cli.author.as_ref().unwrap_or(&config.default_author),
         config,
         cli.no_deps,
@@ -140,15 +177,15 @@ fn create_project(cli: &Cli, config: &Config) -> Result<()> {
     )?;
 
     if !cli.no_git && config.create_git_repo {
-        init_git_repo(target_dir)?;
+        init_git_repo(&target_dir)?;
     }
 
     if !cli.no_deps {
-        add_dependencies(target_dir, config)?;
+        add_dependencies(&target_dir, config)?;
     }
 
     if !cli.no_verify {
-        verify_build(target_dir)?;
+        verify_build(&target_dir)?;
     }
 
     println!("\n{} Project {} created successfully!", "🎉".green(), project.cyan());
@@ -239,7 +276,7 @@ fn main() -> Result<()> {
 
     let config = Config::load(cli.config.as_ref()).context("Failed to load configuration")?;
 
-    info!("Starting scaffold with project name: {}", cli.project);
+    info!("Starting scaffold with project name: {:?}", cli.project);
 
     create_project(&cli, &config).context("Failed to create project")?;
 
@@ -255,7 +292,7 @@ mod tests {
 
     fn create_test_cli(project: &str) -> Cli {
         Cli {
-            project: project.to_string(),
+            project: Some(project.to_string()),
             author: Some("Test Author <test@example.com>".to_string()),
             directory: None,
             config: None,
@@ -274,7 +311,7 @@ mod tests {
     #[test]
     fn test_create_project_validates_empty_name() {
         let cli = Cli {
-            project: "".to_string(),
+            project: Some("".to_string()),
             author: None,
             directory: None,
             config: None,
@@ -294,7 +331,7 @@ mod tests {
     #[test]
     fn test_create_project_validates_name_starting_with_dash() {
         let cli = Cli {
-            project: "-invalid".to_string(),
+            project: Some("-invalid".to_string()),
             author: None,
             directory: None,
             config: None,
@@ -314,7 +351,7 @@ mod tests {
     #[test]
     fn test_create_project_validates_name_starting_with_underscore() {
         let cli = Cli {
-            project: "_invalid".to_string(),
+            project: Some("_invalid".to_string()),
             author: None,
             directory: None,
             config: None,
@@ -334,7 +371,7 @@ mod tests {
     #[test]
     fn test_create_project_validates_invalid_characters() {
         let cli = Cli {
-            project: "invalid@name".to_string(),
+            project: Some("invalid@name".to_string()),
             author: None,
             directory: None,
             config: None,
@@ -496,5 +533,45 @@ mod tests {
 
         let cargo_toml = fs::read_to_string(project_dir.join("Cargo.toml")).unwrap();
         assert!(cargo_toml.contains(&config.default_author));
+    }
+
+    #[test]
+    fn test_create_project_derives_name_from_cwd_when_unspecified() {
+        let temp_dir = TempDir::new().unwrap();
+        let project_dir = temp_dir.path().join("from-cwd");
+        fs::create_dir_all(&project_dir).unwrap();
+
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&project_dir).unwrap();
+
+        let mut cli = create_test_cli("placeholder");
+        cli.project = None;
+        cli.directory = None;
+        let config = create_test_config();
+
+        let result = create_project(&cli, &config);
+
+        std::env::set_current_dir(original_dir).unwrap();
+
+        assert!(result.is_ok());
+        assert!(project_dir.join("Cargo.toml").exists());
+        let cargo_toml = fs::read_to_string(project_dir.join("Cargo.toml")).unwrap();
+        assert!(cargo_toml.contains("name = \"from-cwd\""));
+    }
+
+    #[test]
+    fn test_create_project_derives_name_from_directory_flag() {
+        let temp_dir = TempDir::new().unwrap();
+        let project_dir = temp_dir.path().join("from-flag");
+
+        let mut cli = create_test_cli("placeholder");
+        cli.project = None;
+        cli.directory = Some(project_dir.clone());
+        let config = create_test_config();
+
+        let result = create_project(&cli, &config);
+        assert!(result.is_ok());
+        let cargo_toml = fs::read_to_string(project_dir.join("Cargo.toml")).unwrap();
+        assert!(cargo_toml.contains("name = \"from-flag\""));
     }
 }
