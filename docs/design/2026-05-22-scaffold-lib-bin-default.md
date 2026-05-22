@@ -2,8 +2,9 @@
 
 **Author:** Scott Idler
 **Date:** 2026-05-22
-**Status:** In Review
+**Status:** Implemented
 **Review Passes Completed:** 5/5
+**Shipped in:** v0.1.12
 
 ## Summary
 
