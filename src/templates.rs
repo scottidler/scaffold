@@ -35,6 +35,10 @@ pub fn generate_project(
     // Generate build.rs
     generate_build_rs(target_dir, force)?;
 
+    // Generate library crate first (main.rs depends on it via `use <crate>::...`)
+    generate_lib_rs(&src_dir, force)?;
+    generate_lib_tests_rs(&src_dir, force)?;
+
     // Generate source files
     generate_main_rs(project_name, &src_dir, force)?;
     generate_cli_rs(project_name, &src_dir, force)?;
@@ -144,36 +148,43 @@ fn main() {
 }
 
 fn generate_main_rs(project_name: &str, src_dir: &Path, force: bool) -> Result<()> {
-    let main_rs = format!(
-        r#"#![deny(clippy::unwrap_used)]
+    let crate_name = project_name.replace('-', "_");
+
+    let main_rs = MAIN_TEMPLATE
+        .replace("{{PROJECT}}", project_name)
+        .replace("{{CRATE}}", &crate_name);
+
+    write_if_not_exists(&src_dir.join("main.rs"), &main_rs, force)?;
+
+    Ok(())
+}
+
+const MAIN_TEMPLATE: &str = r#"#![deny(clippy::unwrap_used)]
 #![deny(dead_code)]
 #![deny(unused_variables)]
 
 use clap::Parser;
 use colored::*;
-use eyre::{{Context, Result}};
+use eyre::{Context, Result};
 use log::info;
 use std::fs;
 use std::path::PathBuf;
 
+use {{CRATE}}::{Config, run};
+
 mod cli;
-mod config;
-
 use cli::Cli;
-use config::Config;
 
-fn setup_logging() -> Result<()> {{
-    // Create log directory
+fn setup_logging() -> Result<()> {
     let log_dir = dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("{}")
+        .join("{{PROJECT}}")
         .join("logs");
 
     fs::create_dir_all(&log_dir).context("Failed to create log directory")?;
 
-    let log_file = log_dir.join("{}.log");
+    let log_file = log_dir.join("{{PROJECT}}.log");
 
-    // Setup env_logger with file output
     let target = Box::new(
         fs::OpenOptions::new()
             .create(true)
@@ -186,56 +197,92 @@ fn setup_logging() -> Result<()> {{
         .target(env_logger::Target::Pipe(target))
         .init();
 
-    info!("Logging initialized, writing to: {{}}", log_file.display());
+    info!("Logging initialized, writing to: {}", log_file.display());
     Ok(())
-}}
+}
 
-fn run_application(cli: &Cli, config: &Config) -> Result<()> {{
-    info!("Starting application");
-
-    // Load and display configuration
-    println!("{{}}", "✓ Configuration loaded successfully".green());
-    if cli.verbose {{
-        println!("{{}}", "🔍 Verbose mode enabled".yellow());
-    }}
-    if config.debug {{
-        println!("{{}}", "🔍 Debug mode enabled".yellow());
-    }}
-
-    // Demonstrate colored output
-    println!("{{}} Hello from {{}}!", "🎉".green(), "{}".cyan());
-    println!("{{}} Author: {{}}", "👤".blue(), config.name);
-    println!("{{}} Age: {{}}", "📅".blue(), config.age);
-
-    // Log some information
-    info!("Application executed successfully");
-
-    Ok(())
-}}
-
-fn main() -> Result<()> {{
-    // Setup logging first
+fn main() -> Result<()> {
     setup_logging().context("Failed to setup logging")?;
 
-    // Parse CLI arguments
     let cli = Cli::parse();
 
-    // Load configuration
+    if cli.verbose {
+        println!("{}", "🔍 Verbose mode enabled".yellow());
+    }
+
     let config = Config::load(cli.config.as_ref()).context("Failed to load configuration")?;
 
-    info!("Starting with config from: {{:?}}", cli.config);
+    info!("Starting with config from: {:?}", cli.config);
 
-    // Run the main application logic
-    run_application(&cli, &config).context("Application failed")?;
+    let result = run(&config).context("Application failed")?;
+    for message in result.messages {
+        println!("{}", message);
+    }
 
     Ok(())
-}}
-"#,
-        project_name, project_name, project_name
-    );
+}
+"#;
 
-    write_if_not_exists(&src_dir.join("main.rs"), &main_rs, force)?;
+fn generate_lib_rs(src_dir: &Path, force: bool) -> Result<()> {
+    let lib_rs = r#"#![deny(clippy::unwrap_used)]
+#![deny(dead_code)]
+#![deny(unused_variables)]
 
+pub mod config;
+
+pub use config::Config;
+
+use colored::*;
+use eyre::Result;
+use log::info;
+
+#[derive(Debug)]
+pub struct RunResult {
+    pub messages: Vec<String>,
+}
+
+pub fn run(config: &Config) -> Result<RunResult> {
+    info!("run: name={} age={} debug={}", config.name, config.age, config.debug);
+
+    let messages = vec![
+        format!("{} Configuration loaded successfully", "✓".green()),
+        format!("{} Hello from {}!", "🎉".green(), env!("CARGO_PKG_NAME").cyan()),
+        format!("{} Author: {}", "👤".blue(), config.name),
+        format!("{} Age: {}", "📅".blue(), config.age),
+    ];
+
+    Ok(RunResult { messages })
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests;
+"#;
+
+    write_if_not_exists(&src_dir.join("lib.rs"), lib_rs, force)?;
+    Ok(())
+}
+
+fn generate_lib_tests_rs(src_dir: &Path, force: bool) -> Result<()> {
+    let tests_rs = r#"use super::*;
+
+#[test]
+fn test_run_returns_messages() {
+    let config = Config::default();
+    let result = run(&config).unwrap();
+    assert!(!result.messages.is_empty());
+}
+
+#[test]
+fn test_run_messages_mention_project_name() {
+    let config = Config::default();
+    let result = run(&config).unwrap();
+    let joined = result.messages.join("\n");
+    assert!(joined.contains(env!("CARGO_PKG_NAME")));
+}
+"#;
+
+    write_if_not_exists(&src_dir.join("tests.rs"), tests_rs, force)?;
     Ok(())
 }
 
@@ -1072,10 +1119,64 @@ mod tests {
         assert!(main_rs.contains("fn main()"));
         assert!(main_rs.contains("fn setup_logging()"));
         assert!(main_rs.contains("dirs::data_local_dir()"));
-        assert!(main_rs.contains("fn run_application"));
+        assert!(main_rs.contains("use test_main::{Config, run};"));
+        assert!(main_rs.contains("let result = run(&config)"));
         assert!(main_rs.contains(project_name));
         assert!(main_rs.contains("mod cli"));
-        assert!(main_rs.contains("mod config"));
+        assert!(!main_rs.contains("mod config"));
+        assert!(!main_rs.contains("fn run_application"));
+    }
+
+    #[test]
+    fn test_generate_main_rs_translates_hyphens_to_underscores() {
+        let temp_dir = TempDir::new().unwrap();
+        let src_dir = temp_dir.path().join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+        let project_name = "foo-bar-baz";
+
+        generate_main_rs(project_name, &src_dir, false).unwrap();
+
+        let main_rs = fs::read_to_string(src_dir.join("main.rs")).unwrap();
+
+        assert!(main_rs.contains("use foo_bar_baz::{Config, run};"));
+        assert!(!main_rs.contains("use foo-bar-baz::"));
+    }
+
+    #[test]
+    fn test_generate_lib_rs() {
+        let temp_dir = TempDir::new().unwrap();
+        let src_dir = temp_dir.path().join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+
+        generate_lib_rs(&src_dir, false).unwrap();
+
+        let lib_rs = fs::read_to_string(src_dir.join("lib.rs")).unwrap();
+
+        assert!(lib_rs.contains("#![deny(clippy::unwrap_used)]"));
+        assert!(lib_rs.contains("pub mod config;"));
+        assert!(lib_rs.contains("pub use config::Config;"));
+        assert!(lib_rs.contains("pub struct RunResult"));
+        assert!(lib_rs.contains("pub fn run(config: &Config) -> Result<RunResult>"));
+        assert!(lib_rs.contains("#[cfg(test)]"));
+        assert!(lib_rs.contains("mod tests;"));
+        // The library must not depend on clap; only the binary parses CLI args.
+        assert!(!lib_rs.contains("use clap"));
+        assert!(!lib_rs.contains("pub mod cli"));
+    }
+
+    #[test]
+    fn test_generate_lib_tests_rs() {
+        let temp_dir = TempDir::new().unwrap();
+        let src_dir = temp_dir.path().join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+
+        generate_lib_tests_rs(&src_dir, false).unwrap();
+
+        let tests_rs = fs::read_to_string(src_dir.join("tests.rs")).unwrap();
+
+        assert!(tests_rs.contains("use super::*;"));
+        assert!(tests_rs.contains("test_run_returns_messages"));
+        assert!(tests_rs.contains("test_run_messages_mention_project_name"));
     }
 
     #[test]

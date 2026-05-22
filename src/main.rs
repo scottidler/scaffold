@@ -137,6 +137,12 @@ fn create_project(cli: &Cli, config: &Config) -> Result<()> {
         ));
     }
 
+    if project.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+        return Err(eyre::eyre!(
+            "Project name cannot start with a digit (would produce an invalid Rust identifier in the generated lib import)"
+        ));
+    }
+
     if !project.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
         return Err(eyre::eyre!(
             "Project name must contain only alphanumeric characters, hyphens, and underscores"
