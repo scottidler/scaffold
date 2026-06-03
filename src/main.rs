@@ -19,7 +19,9 @@ use cli::Cli;
 use config::Config;
 
 fn setup_logging() -> Result<()> {
-    let log_dir = dirs::data_local_dir()
+    // xdg_data_dir() (not dirs::data_local_dir()) so macOS also honors XDG and logs
+    // land in ~/.local/share - matching the path advertised in `--help`.
+    let log_dir = config::xdg_data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("scaffold")
         .join("logs");
