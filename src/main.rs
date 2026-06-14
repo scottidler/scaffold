@@ -190,6 +190,7 @@ fn create_project(cli: &Cli, config: &Config) -> Result<()> {
         config,
         cli.no_deps,
         cli.force,
+        cli.rust_version.as_deref(),
     )?;
 
     if !cli.no_git && config.create_git_repo {
@@ -317,6 +318,7 @@ mod tests {
             no_sample_config: false,
             no_verify: true,
             no_deps: true,
+            rust_version: None,
         }
     }
 
@@ -336,6 +338,7 @@ mod tests {
             no_sample_config: false,
             no_verify: true,
             no_deps: true,
+            rust_version: None,
         };
         let config = create_test_config();
 
@@ -356,6 +359,7 @@ mod tests {
             no_sample_config: false,
             no_verify: true,
             no_deps: true,
+            rust_version: None,
         };
         let config = create_test_config();
 
@@ -376,6 +380,7 @@ mod tests {
             no_sample_config: false,
             no_verify: true,
             no_deps: true,
+            rust_version: None,
         };
         let config = create_test_config();
 
@@ -396,6 +401,7 @@ mod tests {
             no_sample_config: false,
             no_verify: true,
             no_deps: true,
+            rust_version: None,
         };
         let config = create_test_config();
 
@@ -675,6 +681,7 @@ mod tests {
             no_sample_config: false,
             no_verify: true,
             no_deps: true,
+            rust_version: None,
         };
         let config = create_test_config();
 

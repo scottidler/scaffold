@@ -3,6 +3,38 @@ use colored::*;
 use eyre::{Context, Result};
 use std::fs;
 use std::path::Path;
+use std::process::Command;
+
+/// Fallback toolchain version pinned into generated workflows when the running
+/// `rustc` cannot be detected (e.g. not on PATH).
+const DEFAULT_RUST_VERSION: &str = "1.96.0";
+
+/// Detect the running toolchain version by parsing `rustc --version`.
+///
+/// `rustc --version` prints e.g. `rustc 1.96.0 (ac68faa20 2026-05-25)`; we take
+/// the second whitespace-delimited token. Falls back to [`DEFAULT_RUST_VERSION`]
+/// if the command fails or the output can't be parsed.
+fn detect_rust_version() -> String {
+    let parsed = Command::new("rustc")
+        .arg("--version")
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .and_then(|stdout| stdout.split_whitespace().nth(1).map(str::to_string));
+
+    match parsed {
+        Some(version) => version,
+        None => {
+            println!(
+                "{} Could not detect running rustc version; pinning workflows to {}",
+                "⚠".yellow(),
+                DEFAULT_RUST_VERSION
+            );
+            DEFAULT_RUST_VERSION.to_string()
+        }
+    }
+}
 
 /// Write content to a file, skipping if it already exists and force is true
 fn write_if_not_exists(path: &Path, content: &str, force: bool) -> Result<()> {
@@ -24,7 +56,14 @@ pub fn generate_project(
     config: &Config,
     include_deps: bool,
     force: bool,
+    rust_version: Option<&str>,
 ) -> Result<()> {
+    // Pin generated CI workflows to the explicit override, else the running toolchain.
+    let rust_version = match rust_version {
+        Some(version) => version.to_string(),
+        None => detect_rust_version(),
+    };
+
     // Create src directory
     let src_dir = target_dir.join("src");
     fs::create_dir_all(&src_dir).context("Failed to create src directory")?;
@@ -55,7 +94,7 @@ pub fn generate_project(
     generate_rustfmt_toml(target_dir, force)?;
 
     // Generate GitHub Actions workflows
-    generate_github_workflows(project_name, target_dir, force)?;
+    generate_github_workflows(project_name, target_dir, &rust_version, force)?;
 
     // Generate .otto.yml for CI
     generate_otto_yml(project_name, target_dir, force)?;
@@ -582,17 +621,17 @@ fn generate_rustfmt_toml(target_dir: &Path, force: bool) -> Result<()> {
     Ok(())
 }
 
-fn generate_github_workflows(project_name: &str, target_dir: &Path, force: bool) -> Result<()> {
+fn generate_github_workflows(project_name: &str, target_dir: &Path, rust_version: &str, force: bool) -> Result<()> {
     let workflows_dir = target_dir.join(".github").join("workflows");
     fs::create_dir_all(&workflows_dir).context("Failed to create .github/workflows directory")?;
 
-    generate_github_ci_yml(&workflows_dir, force)?;
-    generate_github_release_yml(project_name, &workflows_dir, force)?;
+    generate_github_ci_yml(&workflows_dir, rust_version, force)?;
+    generate_github_release_yml(project_name, &workflows_dir, rust_version, force)?;
 
     Ok(())
 }
 
-fn generate_github_ci_yml(workflows_dir: &Path, force: bool) -> Result<()> {
+fn generate_github_ci_yml(workflows_dir: &Path, rust_version: &str, force: bool) -> Result<()> {
     let ci_yml = r#"name: CI
 
 on:
@@ -601,7 +640,7 @@ on:
   pull_request:
 
 env:
-  RUST_VERSION: 1.94.0
+  RUST_VERSION: __RUST_VERSION__
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -655,14 +694,20 @@ jobs:
 
     - name: Build
       run: cargo build --release --verbose
-"#;
+"#
+    .replace("__RUST_VERSION__", rust_version);
 
-    write_if_not_exists(&workflows_dir.join("ci.yml"), ci_yml, force)?;
+    write_if_not_exists(&workflows_dir.join("ci.yml"), &ci_yml, force)?;
 
     Ok(())
 }
 
-fn generate_github_release_yml(project_name: &str, workflows_dir: &Path, force: bool) -> Result<()> {
+fn generate_github_release_yml(
+    project_name: &str,
+    workflows_dir: &Path,
+    rust_version: &str,
+    force: bool,
+) -> Result<()> {
     let release_yml = r#"name: Release
 
 on:
@@ -671,7 +716,7 @@ on:
       - 'v*'
 
 env:
-  RUST_VERSION: 1.94.0
+  RUST_VERSION: __RUST_VERSION__
   CARGO_TERM_COLOR: always
 
 permissions:
@@ -820,7 +865,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 "#
-    .replace("{{PROJECT}}", project_name);
+    .replace("{{PROJECT}}", project_name)
+    .replace("__RUST_VERSION__", rust_version);
 
     write_if_not_exists(&workflows_dir.join("release.yml"), &release_yml, force)?;
 
@@ -1093,7 +1139,7 @@ mod tests {
         let author = "Test Author <test@example.com>";
         let config = create_test_config();
 
-        let result = generate_project(project_name, temp_dir.path(), author, &config, false, false);
+        let result = generate_project(project_name, temp_dir.path(), author, &config, false, false, None);
         assert!(result.is_ok());
 
         // Check that all expected files were created
@@ -1383,7 +1429,7 @@ mod tests {
 
         for author in authors.iter() {
             let project_dir = temp_dir.path().join(author.replace(['<', '>', '@', ' '], "_"));
-            let result = generate_project(project_name, &project_dir, author, &config, false, false);
+            let result = generate_project(project_name, &project_dir, author, &config, false, false, None);
             assert!(result.is_ok(), "Failed for author: {}", author);
 
             let cargo_toml = fs::read_to_string(project_dir.join("Cargo.toml")).unwrap();
@@ -1401,7 +1447,7 @@ mod tests {
 
         for project_name in project_names.iter() {
             let project_dir = temp_dir.path().join(project_name);
-            let result = generate_project(project_name, &project_dir, author, &config, false, false);
+            let result = generate_project(project_name, &project_dir, author, &config, false, false, None);
             assert!(result.is_ok(), "Failed for project name: {}", project_name);
 
             let cargo_toml = fs::read_to_string(project_dir.join("Cargo.toml")).unwrap();
@@ -1419,19 +1465,52 @@ mod tests {
     }
 
     #[test]
+    fn test_detect_rust_version_returns_dotted_semver() {
+        // rustc is always present in this project's build/test environment, so
+        // detection should yield a dotted version (e.g. "1.96.0"), never the
+        // bare fallback placeholder.
+        let version = detect_rust_version();
+        assert!(!version.is_empty());
+        assert!(
+            version.split('.').count() >= 2,
+            "expected a dotted version, got: {}",
+            version
+        );
+        assert!(version.chars().next().unwrap().is_ascii_digit());
+    }
+
+    #[test]
+    fn test_generate_project_pins_detected_version_without_override() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = create_test_config();
+        let project_dir = temp_dir.path().join("detected");
+
+        let result = generate_project("detected", &project_dir, "Test Author", &config, false, false, None);
+        assert!(result.is_ok());
+
+        let ci_yml = fs::read_to_string(project_dir.join(".github/workflows/ci.yml")).unwrap();
+        assert!(ci_yml.contains(&format!("RUST_VERSION: {}", detect_rust_version())));
+        assert!(!ci_yml.contains("__RUST_VERSION__"));
+    }
+
+    #[test]
     fn test_generate_github_ci_yml() {
         let temp_dir = TempDir::new().unwrap();
         let workflows_dir = temp_dir.path().join(".github").join("workflows");
         fs::create_dir_all(&workflows_dir).unwrap();
 
-        let result = generate_github_ci_yml(&workflows_dir, false);
+        let result = generate_github_ci_yml(&workflows_dir, "1.95.0", false);
         assert!(result.is_ok());
 
         let ci_yml = fs::read_to_string(workflows_dir.join("ci.yml")).unwrap();
 
         assert!(ci_yml.contains("name: CI"));
         assert!(ci_yml.contains("branches: [main]"));
-        assert!(ci_yml.contains("RUST_VERSION: 1.94.0"));
+        // The pinned version is injected from the passed-in toolchain version,
+        // and the GitHub Actions ${{ env.RUST_VERSION }} placeholders survive intact.
+        assert!(ci_yml.contains("RUST_VERSION: 1.95.0"));
+        assert!(!ci_yml.contains("__RUST_VERSION__"));
+        assert!(ci_yml.contains("toolchain: ${{ env.RUST_VERSION }}"));
         assert!(ci_yml.contains("cargo test --verbose"));
         assert!(ci_yml.contains("cargo fmt --check"));
         assert!(ci_yml.contains("cargo clippy -- -D warnings"));
@@ -1446,13 +1525,16 @@ mod tests {
         fs::create_dir_all(&workflows_dir).unwrap();
         let project_name = "test-release";
 
-        let result = generate_github_release_yml(project_name, &workflows_dir, false);
+        let result = generate_github_release_yml(project_name, &workflows_dir, "1.95.0", false);
         assert!(result.is_ok());
 
         let release_yml = fs::read_to_string(workflows_dir.join("release.yml")).unwrap();
 
         assert!(release_yml.contains("name: Release"));
         assert!(release_yml.contains("- 'v*'"));
+        // Verify toolchain version was substituted
+        assert!(release_yml.contains("RUST_VERSION: 1.95.0"));
+        assert!(!release_yml.contains("__RUST_VERSION__"));
         assert!(release_yml.contains("contents: write"));
         assert!(release_yml.contains("x86_64-unknown-linux-gnu"));
         assert!(release_yml.contains("aarch64-unknown-linux-gnu"));
@@ -1472,7 +1554,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let project_name = "test-workflows";
 
-        let result = generate_github_workflows(project_name, temp_dir.path(), false);
+        let result = generate_github_workflows(project_name, temp_dir.path(), "1.95.0", false);
         assert!(result.is_ok());
 
         assert!(temp_dir.path().join(".github/workflows/ci.yml").exists());
@@ -1489,7 +1571,7 @@ mod tests {
         // Ensure src directory doesn't exist initially
         assert!(!temp_dir.path().join("src").exists());
 
-        let result = generate_project(project_name, temp_dir.path(), author, &config, false, false);
+        let result = generate_project(project_name, temp_dir.path(), author, &config, false, false, None);
         assert!(result.is_ok());
 
         // Verify src directory was created

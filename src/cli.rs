@@ -46,6 +46,14 @@ pub struct Cli {
         help = "Don't add dependencies with cargo add (much faster, generates basic Cargo.toml)"
     )]
     pub no_deps: bool,
+
+    /// Rust toolchain version to pin in generated CI workflows (default: running rustc version)
+    #[arg(
+        long,
+        value_name = "VERSION",
+        help = "Rust toolchain version to pin in generated CI workflows (default: running rustc version)"
+    )]
+    pub rust_version: Option<String>,
 }
 
 #[cfg(test)]
