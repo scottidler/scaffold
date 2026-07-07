@@ -16,6 +16,19 @@ create-sample-config: true
 # Enable debug logging
 debug: false
 
+# GitHub Actions reusable-workflow wiring for generated projects.
+# The generated .github/workflows/{ci,release}.yml are thin callers that `uses:`
+# the reusable workflows in <org>/github-actions. The org is normally auto-detected
+# from the target repo's git remote (origin); these are the fallbacks.
+workflow:
+  # Org hosting the reusable workflows when it can't be detected from the git remote.
+  # The reusable repo is always "<default-org>/github-actions".
+  # Override per-run with --org (e.g. --org tatari-tv).
+  default-org: scottidler
+  # Git ref (tag/branch) the generated callers pin the reusable workflows to.
+  # Override per-run with --workflow-ref (e.g. --workflow-ref v5 for tatari-tv).
+  ref: v1
+
 # Template configuration - controls what gets generated
 template:
   # Default project structure

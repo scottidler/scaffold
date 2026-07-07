@@ -57,6 +57,8 @@ pub fn generate_project(
     include_deps: bool,
     force: bool,
     rust_version: Option<&str>,
+    workflow_org: &str,
+    workflow_ref: &str,
 ) -> Result<()> {
     // Pin generated CI workflows to the explicit override, else the running toolchain.
     let rust_version = match rust_version {
@@ -94,7 +96,7 @@ pub fn generate_project(
     generate_rustfmt_toml(target_dir, force)?;
 
     // Generate GitHub Actions workflows
-    generate_github_workflows(project_name, target_dir, &rust_version, force)?;
+    generate_github_workflows(target_dir, &rust_version, workflow_org, workflow_ref, force)?;
 
     // Generate .otto.yml for CI
     generate_otto_yml(project_name, target_dir, force)?;
@@ -621,80 +623,53 @@ fn generate_rustfmt_toml(target_dir: &Path, force: bool) -> Result<()> {
     Ok(())
 }
 
-fn generate_github_workflows(project_name: &str, target_dir: &Path, rust_version: &str, force: bool) -> Result<()> {
+fn generate_github_workflows(
+    target_dir: &Path,
+    rust_version: &str,
+    workflow_org: &str,
+    workflow_ref: &str,
+    force: bool,
+) -> Result<()> {
     let workflows_dir = target_dir.join(".github").join("workflows");
     fs::create_dir_all(&workflows_dir).context("Failed to create .github/workflows directory")?;
 
-    generate_github_ci_yml(&workflows_dir, rust_version, force)?;
-    generate_github_release_yml(project_name, &workflows_dir, rust_version, force)?;
+    generate_github_ci_yml(&workflows_dir, rust_version, workflow_org, workflow_ref, force)?;
+    generate_github_release_yml(&workflows_dir, rust_version, workflow_org, workflow_ref, force)?;
 
     Ok(())
 }
 
-fn generate_github_ci_yml(workflows_dir: &Path, rust_version: &str, force: bool) -> Result<()> {
+fn generate_github_ci_yml(
+    workflows_dir: &Path,
+    rust_version: &str,
+    workflow_org: &str,
+    workflow_ref: &str,
+    force: bool,
+) -> Result<()> {
+    // Thin caller: delegates to the reusable rust-ci workflow in <org>/github-actions
+    // (runs `otto ci`). Edit the reusable workflow there, not this file.
     let ci_yml = r#"name: CI
+
+# Thin caller: delegates Rust CI (otto ci) to the org's reusable workflow.
+# Source: __ORG__/github-actions/.github/workflows/rust-ci.yml (pinned to __REF__).
+# Change the pipeline by editing the reusable workflow, not this file.
 
 on:
   push:
     branches: [main]
   pull_request:
 
-env:
-  RUST_VERSION: __RUST_VERSION__
-  CARGO_TERM_COLOR: always
+permissions:
+  contents: read
 
 jobs:
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v6
-
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@master
-      with:
-        toolchain: ${{ env.RUST_VERSION }}
-        components: rustfmt, clippy
-
-    - name: Cache Rust dependencies
-      uses: Swatinem/rust-cache@v2
-      with:
-        prefix-key: "v1-rust"
-
-    - name: Run tests
-      run: cargo test --verbose
-
-    - name: Check formatting
-      run: cargo fmt --check
-
-    - name: Run clippy
-      run: cargo clippy -- -D warnings
-
-  build:
-    name: Build
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-          - os: macos-14  # Apple Silicon ARM
-    steps:
-    - uses: actions/checkout@v6
-
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@master
-      with:
-        toolchain: ${{ env.RUST_VERSION }}
-
-    - name: Cache Rust dependencies
-      uses: Swatinem/rust-cache@v2
-      with:
-        prefix-key: "v1-rust"
-        shared-key: ${{ matrix.os }}
-
-    - name: Build
-      run: cargo build --release --verbose
+  ci:
+    uses: __ORG__/github-actions/.github/workflows/rust-ci.yml@__REF__
+    with:
+      rust-version: "__RUST_VERSION__"
 "#
+    .replace("__ORG__", workflow_org)
+    .replace("__REF__", workflow_ref)
     .replace("__RUST_VERSION__", rust_version);
 
     write_if_not_exists(&workflows_dir.join("ci.yml"), &ci_yml, force)?;
@@ -703,169 +678,40 @@ jobs:
 }
 
 fn generate_github_release_yml(
-    project_name: &str,
     workflows_dir: &Path,
     rust_version: &str,
+    workflow_org: &str,
+    workflow_ref: &str,
     force: bool,
 ) -> Result<()> {
+    // Thin caller: delegates to the reusable rust-cli-release workflow in
+    // <org>/github-actions (cross-compile, tarball + sha256, publish GitHub Release).
+    // The reusable workflow defaults the binary/archive names to the repo name, so a
+    // single-binary crate needs no inputs beyond the pinned toolchain.
     let release_yml = r#"name: Release
+
+# Thin caller: delegates the tag-driven CLI release to the org's reusable workflow.
+# Source: __ORG__/github-actions/.github/workflows/rust-cli-release.yml (pinned to __REF__).
+# Cross-compiles linux amd64/arm64 + macOS x86_64/arm64, tarballs + sha256 each, and
+# publishes a GitHub Release. Change the pipeline by editing the reusable workflow.
 
 on:
   push:
     tags:
       - 'v*'
-
-env:
-  RUST_VERSION: __RUST_VERSION__
-  CARGO_TERM_COLOR: always
+  workflow_dispatch: {}
 
 permissions:
   contents: write
 
 jobs:
-  build-linux:
-    runs-on: ubuntu-latest
-    container: debian:bookworm
-    strategy:
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            suffix: linux-amd64
-            cross: false
-          - target: aarch64-unknown-linux-gnu
-            suffix: linux-arm64
-            cross: true
-    steps:
-      - name: Install build dependencies
-        run: |
-          apt-get update
-          apt-get install -y curl build-essential git pkg-config libssl-dev
-
-      - name: Install cross-compilation toolchain
-        if: matrix.cross
-        run: apt-get install -y gcc-aarch64-linux-gnu
-
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-
-      - name: Mark workspace as safe for git
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      - name: Set GIT_DESCRIBE environment variable
-        run: |
-          GIT_DESCRIBE=$(git describe --tags --dirty --always)
-          echo "GIT_DESCRIBE=$GIT_DESCRIBE" >> $GITHUB_ENV
-
-      - name: Set up Rust
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain ${{ env.RUST_VERSION }}
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-          . "$HOME/.cargo/env"
-          rustup target add ${{ matrix.target }}
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: ${{ matrix.target }}
-
-      - name: Build for ${{ matrix.target }}
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.cross && 'aarch64-linux-gnu-gcc' || '' }}
-        run: cargo build --release --target ${{ matrix.target }}
-
-      - name: Package binary
-        run: |
-          mkdir -p artifacts/
-          cp target/${{ matrix.target }}/release/{{PROJECT}} artifacts/
-
-      - name: Archive artifacts
-        run: tar -czvf {{PROJECT}}-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz -C artifacts {{PROJECT}}
-
-      - name: Generate checksum
-        run: sha256sum {{PROJECT}}-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz > {{PROJECT}}-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz.sha256
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: {{PROJECT}}-${{ matrix.suffix }}
-          path: |
-            {{PROJECT}}-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz
-            {{PROJECT}}-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz.sha256
-
-  build-macos:
-    runs-on: macos-14
-    strategy:
-      matrix:
-        include:
-          - target: x86_64-apple-darwin
-            suffix: macos-x86_64
-          - target: aarch64-apple-darwin
-            suffix: macos-arm64
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-
-      - name: Set GIT_DESCRIBE environment variable
-        run: |
-          GIT_DESCRIBE=$(git describe --tags --dirty --always)
-          echo "GIT_DESCRIBE=$GIT_DESCRIBE" >> $GITHUB_ENV
-
-      - name: Set up Rust
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain ${{ env.RUST_VERSION }}
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-          rustup target add ${{ matrix.target }}
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: ${{ matrix.target }}
-
-      - name: Build for ${{ matrix.target }}
-        run: cargo build --release --target ${{ matrix.target }}
-
-      - name: Package binary
-        run: |
-          mkdir -p artifacts/
-          cp target/${{ matrix.target }}/release/{{PROJECT}} artifacts/
-
-      - name: Archive artifacts
-        run: tar -czvf {{PROJECT}}-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz -C artifacts {{PROJECT}}
-
-      - name: Generate checksum
-        run: shasum -a 256 {{PROJECT}}-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz > {{PROJECT}}-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz.sha256
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: {{PROJECT}}-${{ matrix.suffix }}
-          path: |
-            {{PROJECT}}-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz
-            {{PROJECT}}-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz.sha256
-
-  create-release:
-    needs: [build-linux, build-macos]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v8
-        with:
-          path: artifacts/
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: 'artifacts/**'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  release:
+    uses: __ORG__/github-actions/.github/workflows/rust-cli-release.yml@__REF__
+    with:
+      rust-version: "__RUST_VERSION__"
 "#
-    .replace("{{PROJECT}}", project_name)
+    .replace("__ORG__", workflow_org)
+    .replace("__REF__", workflow_ref)
     .replace("__RUST_VERSION__", rust_version);
 
     write_if_not_exists(&workflows_dir.join("release.yml"), &release_yml, force)?;
@@ -1122,460 +968,4 @@ fn generate_pre_commit_config(target_dir: &Path, force: bool) -> Result<()> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use tempfile::TempDir;
-
-    fn create_test_config() -> Config {
-        Config::default()
-    }
-
-    #[test]
-    fn test_generate_project_creates_all_files() {
-        let temp_dir = TempDir::new().unwrap();
-        let project_name = "test-project";
-        let author = "Test Author <test@example.com>";
-        let config = create_test_config();
-
-        let result = generate_project(project_name, temp_dir.path(), author, &config, false, false, None);
-        assert!(result.is_ok());
-
-        // Check that all expected files were created
-        assert!(temp_dir.path().join("Cargo.toml").exists());
-        assert!(temp_dir.path().join("build.rs").exists());
-        assert!(temp_dir.path().join("src").exists());
-        assert!(temp_dir.path().join("src/main.rs").exists());
-        assert!(temp_dir.path().join("src/cli.rs").exists());
-        assert!(temp_dir.path().join("src/config.rs").exists());
-        assert!(temp_dir.path().join("src/config/tests.rs").exists());
-        assert!(temp_dir.path().join(format!("{}.yml", project_name)).exists());
-        assert!(temp_dir.path().join(".github/workflows/ci.yml").exists());
-        assert!(temp_dir.path().join(".github/workflows/release.yml").exists());
-        assert!(temp_dir.path().join(".pre-commit-config.yaml").exists());
-    }
-
-    #[test]
-    fn test_generate_cargo_toml_basic_structure() {
-        let temp_dir = TempDir::new().unwrap();
-        let project_name = "test-cargo";
-        let author = "Test Author <test@example.com>";
-        let config = create_test_config();
-
-        let result = generate_cargo_toml(project_name, temp_dir.path(), author, &config, false, false);
-        assert!(result.is_ok());
-
-        let cargo_toml = fs::read_to_string(temp_dir.path().join("Cargo.toml")).unwrap();
-
-        assert!(cargo_toml.contains(&format!("name = \"{}\"", project_name)));
-        assert!(cargo_toml.contains("version = \"0.1.0\""));
-        assert!(cargo_toml.contains("edition = \"2024\""));
-        assert!(cargo_toml.contains(author));
-        assert!(cargo_toml.contains("build = \"build.rs\""));
-        assert!(cargo_toml.contains("[dependencies]"));
-        assert!(cargo_toml.contains("[dev-dependencies]"));
-        assert!(cargo_toml.contains("tempfile = \"3\""));
-        assert!(cargo_toml.contains("[build-dependencies]"));
-    }
-
-    #[test]
-    fn test_generate_cargo_toml_with_dependencies() {
-        let temp_dir = TempDir::new().unwrap();
-        let project_name = "test-deps";
-        let author = "Test Author";
-        let config = create_test_config();
-
-        let result = generate_cargo_toml(project_name, temp_dir.path(), author, &config, true, false);
-        assert!(result.is_ok());
-
-        let cargo_toml = fs::read_to_string(temp_dir.path().join("Cargo.toml")).unwrap();
-
-        // Check that dependencies are included
-        assert!(cargo_toml.contains("clap"));
-        assert!(cargo_toml.contains("eyre"));
-        assert!(cargo_toml.contains("serde"));
-        assert!(cargo_toml.contains("derive"));
-    }
-
-    #[test]
-    fn test_generate_cargo_toml_without_dependencies() {
-        let temp_dir = TempDir::new().unwrap();
-        let project_name = "test-no-deps";
-        let author = "Test Author";
-        let config = create_test_config();
-
-        let result = generate_cargo_toml(project_name, temp_dir.path(), author, &config, false, false);
-        assert!(result.is_ok());
-
-        let cargo_toml = fs::read_to_string(temp_dir.path().join("Cargo.toml")).unwrap();
-
-        // Check that dependencies comment is included instead
-        assert!(cargo_toml.contains("Dependencies will be added via cargo add"));
-        assert!(!cargo_toml.contains("clap = "));
-        assert!(!cargo_toml.contains("eyre = "));
-    }
-
-    #[test]
-    fn test_generate_build_rs() {
-        let temp_dir = TempDir::new().unwrap();
-
-        let result = generate_build_rs(temp_dir.path(), false);
-        assert!(result.is_ok());
-
-        let build_rs = fs::read_to_string(temp_dir.path().join("build.rs")).unwrap();
-
-        assert!(build_rs.contains("fn main()"));
-        assert!(build_rs.contains("git describe"));
-        assert!(build_rs.contains("GIT_DESCRIBE"));
-        assert!(build_rs.contains("cargo:rerun-if-changed=.git/HEAD"));
-        assert!(build_rs.contains("cargo:rerun-if-changed=.git/refs/"));
-    }
-
-    #[test]
-    fn test_generate_main_rs() {
-        let temp_dir = TempDir::new().unwrap();
-        let src_dir = temp_dir.path().join("src");
-        fs::create_dir_all(&src_dir).unwrap();
-        let project_name = "test-main";
-
-        let result = generate_main_rs(project_name, &src_dir, false);
-        assert!(result.is_ok());
-
-        let main_rs = fs::read_to_string(src_dir.join("main.rs")).unwrap();
-
-        assert!(main_rs.contains("use clap::Parser"));
-        assert!(main_rs.contains("use colored::*"));
-        assert!(main_rs.contains("use eyre::{Context, Result}"));
-        assert!(main_rs.contains("fn main()"));
-        assert!(main_rs.contains("fn setup_logging()"));
-        assert!(main_rs.contains("xdg_data_dir()"));
-        assert!(
-            !main_rs.contains("dirs::data_local_dir()"),
-            "generated main.rs must use xdg_data_dir(), not dirs::data_local_dir() (wrong path on macOS)"
-        );
-        assert!(main_rs.contains("use test_main::{Config, run};"));
-        assert!(main_rs.contains("let result = run(&config)"));
-        assert!(main_rs.contains(project_name));
-        assert!(main_rs.contains("mod cli"));
-        assert!(!main_rs.contains("mod config"));
-        assert!(!main_rs.contains("fn run_application"));
-    }
-
-    #[test]
-    fn test_generate_main_rs_translates_hyphens_to_underscores() {
-        let temp_dir = TempDir::new().unwrap();
-        let src_dir = temp_dir.path().join("src");
-        fs::create_dir_all(&src_dir).unwrap();
-        let project_name = "foo-bar-baz";
-
-        generate_main_rs(project_name, &src_dir, false).unwrap();
-
-        let main_rs = fs::read_to_string(src_dir.join("main.rs")).unwrap();
-
-        assert!(main_rs.contains("use foo_bar_baz::{Config, run};"));
-        assert!(!main_rs.contains("use foo-bar-baz::"));
-    }
-
-    #[test]
-    fn test_generate_lib_rs() {
-        let temp_dir = TempDir::new().unwrap();
-        let src_dir = temp_dir.path().join("src");
-        fs::create_dir_all(&src_dir).unwrap();
-
-        generate_lib_rs(&src_dir, false).unwrap();
-
-        let lib_rs = fs::read_to_string(src_dir.join("lib.rs")).unwrap();
-
-        assert!(lib_rs.contains("#![deny(clippy::unwrap_used)]"));
-        assert!(lib_rs.contains("pub mod config;"));
-        assert!(lib_rs.contains("pub use config::Config;"));
-        assert!(lib_rs.contains("pub struct RunResult"));
-        assert!(lib_rs.contains("pub fn run(config: &Config) -> Result<RunResult>"));
-        assert!(lib_rs.contains("#[cfg(test)]"));
-        assert!(lib_rs.contains("mod tests;"));
-        // The library must not depend on clap; only the binary parses CLI args.
-        assert!(!lib_rs.contains("use clap"));
-        assert!(!lib_rs.contains("pub mod cli"));
-    }
-
-    #[test]
-    fn test_generate_lib_tests_rs() {
-        let temp_dir = TempDir::new().unwrap();
-        let src_dir = temp_dir.path().join("src");
-        fs::create_dir_all(&src_dir).unwrap();
-
-        generate_lib_tests_rs(&src_dir, false).unwrap();
-
-        let tests_rs = fs::read_to_string(src_dir.join("tests.rs")).unwrap();
-
-        assert!(tests_rs.contains("use super::*;"));
-        assert!(tests_rs.contains("test_run_returns_messages"));
-        assert!(tests_rs.contains("test_run_messages_mention_project_name"));
-    }
-
-    #[test]
-    fn test_generate_cli_rs() {
-        let temp_dir = TempDir::new().unwrap();
-        let src_dir = temp_dir.path().join("src");
-        fs::create_dir_all(&src_dir).unwrap();
-        let project_name = "test-cli";
-        let config = create_test_config();
-
-        let result = generate_cli_rs(project_name, &src_dir, &config, false);
-        assert!(result.is_ok());
-
-        let cli_rs = fs::read_to_string(src_dir.join("cli.rs")).unwrap();
-
-        assert!(cli_rs.contains("use clap::Parser"));
-        assert!(cli_rs.contains("#[derive(Parser)]"));
-        assert!(cli_rs.contains(&format!("name = \"{}\"", project_name)));
-        assert!(cli_rs.contains("pub struct Cli"));
-        assert!(cli_rs.contains("pub config: Option<PathBuf>"));
-        assert!(cli_rs.contains("pub verbose: bool"));
-        assert!(cli_rs.contains("A CLI application generated by rust-scaffold"));
-        // after_help advertises the XDG log path, with {{PROJECT}} substituted.
-        assert!(cli_rs.contains("after_help ="));
-        assert!(cli_rs.contains(&format!("logs/{}.log", project_name)));
-        assert!(!cli_rs.contains("{{PROJECT}}"));
-    }
-
-    #[test]
-    fn test_generate_config_rs() {
-        let temp_dir = TempDir::new().unwrap();
-        let src_dir = temp_dir.path().join("src");
-        fs::create_dir_all(&src_dir).unwrap();
-
-        let result = generate_config_rs(&src_dir, false);
-        assert!(result.is_ok());
-
-        let config_rs = fs::read_to_string(src_dir.join("config.rs")).unwrap();
-
-        assert!(config_rs.contains("use serde::{Deserialize, Serialize}"));
-        assert!(config_rs.contains("rename_all = \"kebab-case\""));
-        assert!(config_rs.contains("pub struct Config"));
-        assert!(config_rs.contains("pub name: String"));
-        assert!(config_rs.contains("pub age: u32"));
-        assert!(config_rs.contains("pub debug: bool"));
-        assert!(config_rs.contains("impl Default for Config"));
-        assert!(config_rs.contains("fn xdg_config_dir()"));
-        assert!(config_rs.contains("pub fn xdg_data_dir()"));
-        assert!(
-            !config_rs.contains("dirs::config_dir()"),
-            "generated config.rs must use xdg_config_dir(), not dirs::config_dir() (wrong path on macOS)"
-        );
-        assert!(config_rs.contains("pub fn load"));
-        assert!(config_rs.contains("fn load_from_file"));
-        assert!(config_rs.contains("John Doe"));
-        assert!(config_rs.contains("#[cfg(test)]\nmod tests;"));
-    }
-
-    #[test]
-    fn test_generate_config_tests_rs() {
-        let temp_dir = TempDir::new().unwrap();
-        let src_dir = temp_dir.path().join("src");
-        fs::create_dir_all(&src_dir).unwrap();
-
-        let result = generate_config_tests_rs(&src_dir, false);
-        assert!(result.is_ok());
-
-        let tests_rs = fs::read_to_string(src_dir.join("config/tests.rs")).unwrap();
-
-        assert!(tests_rs.contains("use super::*"));
-        assert!(tests_rs.contains("XDG_CONFIG_HOME"));
-        assert!(tests_rs.contains("XDG_DATA_HOME"));
-        assert!(tests_rs.contains("test_xdg_config_dir_honors_env_and_falls_back"));
-        assert!(tests_rs.contains("test_xdg_data_dir_honors_env_and_falls_back"));
-        // The macOS Application Support assertion is gone - paths are XDG on every platform.
-        assert!(
-            !tests_rs.contains("Application Support"),
-            "generated tests must not assert the macOS Application Support path"
-        );
-        assert!(tests_rs.contains("test_config_load_from_explicit_path"));
-        assert!(tests_rs.contains("test_config_default_values"));
-    }
-
-    #[test]
-    fn test_generate_sample_config() {
-        let temp_dir = TempDir::new().unwrap();
-        let project_name = "test-sample";
-
-        let result = generate_sample_config(project_name, temp_dir.path(), false);
-        assert!(result.is_ok());
-
-        let config_file = temp_dir.path().join(format!("{}.yml", project_name));
-        assert!(config_file.exists());
-
-        let config_content = fs::read_to_string(&config_file).unwrap();
-
-        assert!(config_content.contains(project_name));
-        assert!(config_content.contains("name: John Doe"));
-        assert!(config_content.contains("age: 30"));
-        assert!(config_content.contains("debug: false"));
-        assert!(config_content.contains("Sample configuration file"));
-    }
-
-    #[test]
-    fn test_generate_project_with_different_authors() {
-        let temp_dir = TempDir::new().unwrap();
-        let project_name = "test-authors";
-        let config = create_test_config();
-
-        let authors = [
-            "Simple Name",
-            "Name With Spaces <email@example.com>",
-            "Unicode Äuthör <ünicöde@example.com>",
-        ];
-
-        for author in authors.iter() {
-            let project_dir = temp_dir.path().join(author.replace(['<', '>', '@', ' '], "_"));
-            let result = generate_project(project_name, &project_dir, author, &config, false, false, None);
-            assert!(result.is_ok(), "Failed for author: {}", author);
-
-            let cargo_toml = fs::read_to_string(project_dir.join("Cargo.toml")).unwrap();
-            assert!(cargo_toml.contains(author));
-        }
-    }
-
-    #[test]
-    fn test_generate_project_with_special_characters_in_name() {
-        let temp_dir = TempDir::new().unwrap();
-        let config = create_test_config();
-        let author = "Test Author";
-
-        let project_names = ["simple", "with-dashes", "with_underscores", "with123numbers"];
-
-        for project_name in project_names.iter() {
-            let project_dir = temp_dir.path().join(project_name);
-            let result = generate_project(project_name, &project_dir, author, &config, false, false, None);
-            assert!(result.is_ok(), "Failed for project name: {}", project_name);
-
-            let cargo_toml = fs::read_to_string(project_dir.join("Cargo.toml")).unwrap();
-            assert!(cargo_toml.contains(&format!("name = \"{}\"", project_name)));
-
-            let main_rs = fs::read_to_string(project_dir.join("src/main.rs")).unwrap();
-            assert!(main_rs.contains(project_name));
-
-            let cli_rs = fs::read_to_string(project_dir.join("src/cli.rs")).unwrap();
-            assert!(cli_rs.contains(&format!("name = \"{}\"", project_name)));
-
-            let sample_config = project_dir.join(format!("{}.yml", project_name));
-            assert!(sample_config.exists());
-        }
-    }
-
-    #[test]
-    fn test_detect_rust_version_returns_dotted_semver() {
-        // rustc is always present in this project's build/test environment, so
-        // detection should yield a dotted version (e.g. "1.96.0"), never the
-        // bare fallback placeholder.
-        let version = detect_rust_version();
-        assert!(!version.is_empty());
-        assert!(
-            version.split('.').count() >= 2,
-            "expected a dotted version, got: {}",
-            version
-        );
-        assert!(version.chars().next().unwrap().is_ascii_digit());
-    }
-
-    #[test]
-    fn test_generate_project_pins_detected_version_without_override() {
-        let temp_dir = TempDir::new().unwrap();
-        let config = create_test_config();
-        let project_dir = temp_dir.path().join("detected");
-
-        let result = generate_project("detected", &project_dir, "Test Author", &config, false, false, None);
-        assert!(result.is_ok());
-
-        let ci_yml = fs::read_to_string(project_dir.join(".github/workflows/ci.yml")).unwrap();
-        assert!(ci_yml.contains(&format!("RUST_VERSION: {}", detect_rust_version())));
-        assert!(!ci_yml.contains("__RUST_VERSION__"));
-    }
-
-    #[test]
-    fn test_generate_github_ci_yml() {
-        let temp_dir = TempDir::new().unwrap();
-        let workflows_dir = temp_dir.path().join(".github").join("workflows");
-        fs::create_dir_all(&workflows_dir).unwrap();
-
-        let result = generate_github_ci_yml(&workflows_dir, "1.95.0", false);
-        assert!(result.is_ok());
-
-        let ci_yml = fs::read_to_string(workflows_dir.join("ci.yml")).unwrap();
-
-        assert!(ci_yml.contains("name: CI"));
-        assert!(ci_yml.contains("branches: [main]"));
-        // The pinned version is injected from the passed-in toolchain version,
-        // and the GitHub Actions ${{ env.RUST_VERSION }} placeholders survive intact.
-        assert!(ci_yml.contains("RUST_VERSION: 1.95.0"));
-        assert!(!ci_yml.contains("__RUST_VERSION__"));
-        assert!(ci_yml.contains("toolchain: ${{ env.RUST_VERSION }}"));
-        assert!(ci_yml.contains("cargo test --verbose"));
-        assert!(ci_yml.contains("cargo fmt --check"));
-        assert!(ci_yml.contains("cargo clippy -- -D warnings"));
-        assert!(ci_yml.contains("macos-14"));
-        assert!(ci_yml.contains("cargo build --release --verbose"));
-    }
-
-    #[test]
-    fn test_generate_github_release_yml() {
-        let temp_dir = TempDir::new().unwrap();
-        let workflows_dir = temp_dir.path().join(".github").join("workflows");
-        fs::create_dir_all(&workflows_dir).unwrap();
-        let project_name = "test-release";
-
-        let result = generate_github_release_yml(project_name, &workflows_dir, "1.95.0", false);
-        assert!(result.is_ok());
-
-        let release_yml = fs::read_to_string(workflows_dir.join("release.yml")).unwrap();
-
-        assert!(release_yml.contains("name: Release"));
-        assert!(release_yml.contains("- 'v*'"));
-        // Verify toolchain version was substituted
-        assert!(release_yml.contains("RUST_VERSION: 1.95.0"));
-        assert!(!release_yml.contains("__RUST_VERSION__"));
-        assert!(release_yml.contains("contents: write"));
-        assert!(release_yml.contains("x86_64-unknown-linux-gnu"));
-        assert!(release_yml.contains("aarch64-unknown-linux-gnu"));
-        assert!(release_yml.contains("x86_64-apple-darwin"));
-        assert!(release_yml.contains("aarch64-apple-darwin"));
-        assert!(release_yml.contains("softprops/action-gh-release@v2"));
-        // Verify project name was substituted
-        assert!(release_yml.contains("test-release"));
-        assert!(!release_yml.contains("{{PROJECT}}"));
-        // Verify no Docker job
-        assert!(!release_yml.contains("docker"));
-        assert!(!release_yml.contains("Dockerfile"));
-    }
-
-    #[test]
-    fn test_generate_github_workflows() {
-        let temp_dir = TempDir::new().unwrap();
-        let project_name = "test-workflows";
-
-        let result = generate_github_workflows(project_name, temp_dir.path(), "1.95.0", false);
-        assert!(result.is_ok());
-
-        assert!(temp_dir.path().join(".github/workflows/ci.yml").exists());
-        assert!(temp_dir.path().join(".github/workflows/release.yml").exists());
-    }
-
-    #[test]
-    fn test_generate_project_creates_src_directory() {
-        let temp_dir = TempDir::new().unwrap();
-        let project_name = "test-src";
-        let author = "Test Author";
-        let config = create_test_config();
-
-        // Ensure src directory doesn't exist initially
-        assert!(!temp_dir.path().join("src").exists());
-
-        let result = generate_project(project_name, temp_dir.path(), author, &config, false, false, None);
-        assert!(result.is_ok());
-
-        // Verify src directory was created
-        assert!(temp_dir.path().join("src").exists());
-        assert!(temp_dir.path().join("src").is_dir());
-    }
-}
+mod tests;

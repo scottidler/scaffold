@@ -13,6 +13,33 @@ pub struct Config {
     pub create_sample_config: bool,
     pub debug: bool,
     pub template: TemplateConfig,
+    pub workflow: WorkflowConfig,
+}
+
+/// Wiring for the generated `.github/workflows/{ci,release}.yml` thin callers.
+///
+/// The generated workflows do not inline their pipeline; they `uses:` the reusable
+/// workflows in `<org>/github-actions`. The org is normally auto-detected from the
+/// target repo's git remote (see `main::resolve_workflow_org`); these fields are the
+/// fallback org and the ref (tag/branch) the callers pin to.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct WorkflowConfig {
+    /// Org hosting the reusable workflows when it can't be detected from the git
+    /// remote. The reusable repo is always `<default_org>/github-actions`.
+    pub default_org: String,
+    /// Git ref (tag/branch) the generated callers pin the reusable workflows to.
+    #[serde(rename = "ref")]
+    pub git_ref: String,
+}
+
+impl Default for WorkflowConfig {
+    fn default() -> Self {
+        Self {
+            default_org: "scottidler".to_string(),
+            git_ref: "v1".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -48,6 +75,7 @@ impl Default for Config {
             create_sample_config: true,
             debug: false,
             template: TemplateConfig::default(),
+            workflow: WorkflowConfig::default(),
         }
     }
 }
@@ -264,6 +292,26 @@ mod tests {
         assert!(config.create_git_repo);
         assert!(config.create_sample_config);
         assert!(!config.debug);
+    }
+
+    #[test]
+    fn test_workflow_config_default_values() {
+        let config = Config::default();
+        assert_eq!(config.workflow.default_org, "scottidler");
+        assert_eq!(config.workflow.git_ref, "v1");
+    }
+
+    #[test]
+    fn test_workflow_config_deserializes_ref_key() {
+        // The YAML key is `ref` (a Rust keyword), renamed to `git_ref` in the struct.
+        let yaml = r#"
+workflow:
+  default-org: tatari-tv
+  ref: v5
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.workflow.default_org, "tatari-tv");
+        assert_eq!(config.workflow.git_ref, "v5");
     }
 
     #[test]

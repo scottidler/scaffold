@@ -2,8 +2,15 @@
 
 **Author:** Scott Idler
 **Date:** 2026-03-24
-**Status:** Implemented
+**Status:** Superseded (the inlined workflows below were replaced by thin reusable-workflow callers; see `docs/design/2026-06-27-reusable-workflow-callers.md`)
 **Review Passes Completed:** 5/5
+
+> **Superseded:** This doc describes the original approach, where the full CI and
+> release pipelines were inlined into each scaffolded repo's
+> `.github/workflows/{ci,release}.yml`. That has been replaced by thin *caller*
+> workflows that `uses:` the reusable workflows in `<org>/github-actions`. The
+> rationale, org-resolution logic, and new templates are documented in
+> `2026-06-27-reusable-workflow-callers.md`. The section below is kept for history.
 
 ## Summary
 

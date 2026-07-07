@@ -134,6 +134,60 @@ fn resolve_project_and_dir(cli: &Cli) -> Result<(String, PathBuf)> {
     Ok((project, target_dir))
 }
 
+/// Parse the GitHub owner (org/user) out of a remote URL.
+///
+/// Handles the three forms scaffold sees in practice:
+/// - `git@github.com:scottidler/foo.git` (scp-like)
+/// - `ssh://github.com/scottidler/foo` (what the `clone` tool writes)
+/// - `https://github.com/scottidler/foo.git`
+///
+/// Returns `None` if the URL isn't a github.com remote or has no owner segment.
+fn parse_owner_from_remote(url: &str) -> Option<String> {
+    let trimmed = url.trim().trim_end_matches('/');
+    let trimmed = trimmed.strip_suffix(".git").unwrap_or(trimmed);
+    let (_, rest) = trimmed.split_once("github.com")?;
+    // After the host comes either ':' (scp) or '/' (ssh/https); strip both.
+    let rest = rest.trim_start_matches([':', '/']);
+    let owner = rest.split('/').next()?;
+    if owner.is_empty() { None } else { Some(owner.to_string()) }
+}
+
+/// Detect the GitHub org from the target repo's `origin` remote, if it has one.
+///
+/// scaffold is commonly run inside a freshly cloned repo whose `origin` already
+/// points at the destination org, so the generated workflow callers can target the
+/// right `<org>/github-actions`. A fresh, not-yet-remote directory returns `None`.
+fn detect_git_org(target_dir: &std::path::Path) -> Option<String> {
+    log::debug!("detect_git_org: target_dir={}", target_dir.display());
+    let output = Command::new("git")
+        .args(["remote", "get-url", "origin"])
+        .current_dir(target_dir)
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        log::debug!("detect_git_org: no origin remote (git exit {:?})", output.status.code());
+        return None;
+    }
+
+    let url = String::from_utf8_lossy(&output.stdout);
+    let owner = parse_owner_from_remote(&url);
+    log::debug!("detect_git_org: origin={} owner={:?}", url.trim(), owner);
+    owner
+}
+
+/// Resolve the org hosting the reusable workflows: `--org` flag > git remote owner
+/// > config `workflow.default-org`.
+fn resolve_workflow_org(cli: &Cli, config: &Config, target_dir: &std::path::Path) -> String {
+    let org = cli
+        .org
+        .clone()
+        .or_else(|| detect_git_org(target_dir))
+        .unwrap_or_else(|| config.workflow.default_org.clone());
+    log::info!("resolve_workflow_org: org={} (flag={:?})", org, cli.org);
+    org
+}
+
 fn create_project(cli: &Cli, config: &Config) -> Result<()> {
     let (project, target_dir) = resolve_project_and_dir(cli)?;
 
@@ -183,6 +237,12 @@ fn create_project(cli: &Cli, config: &Config) -> Result<()> {
         println!("{} Created directory: {}", "✓".green(), target_dir.display());
     }
 
+    let workflow_org = resolve_workflow_org(cli, config, &target_dir);
+    let workflow_ref = cli
+        .workflow_ref
+        .clone()
+        .unwrap_or_else(|| config.workflow.git_ref.clone());
+
     templates::generate_project(
         &project,
         &target_dir,
@@ -191,6 +251,8 @@ fn create_project(cli: &Cli, config: &Config) -> Result<()> {
         cli.no_deps,
         cli.force,
         cli.rust_version.as_deref(),
+        &workflow_org,
+        &workflow_ref,
     )?;
 
     if !cli.no_git && config.create_git_repo {
@@ -319,11 +381,59 @@ mod tests {
             no_verify: true,
             no_deps: true,
             rust_version: None,
+            org: None,
+            workflow_ref: None,
         }
     }
 
     fn create_test_config() -> Config {
         Config::default()
+    }
+
+    #[test]
+    fn test_parse_owner_from_remote_handles_all_url_forms() {
+        assert_eq!(
+            parse_owner_from_remote("git@github.com:scottidler/foo.git"),
+            Some("scottidler".to_string())
+        );
+        assert_eq!(
+            parse_owner_from_remote("ssh://github.com/scottidler/foo"),
+            Some("scottidler".to_string())
+        );
+        assert_eq!(
+            parse_owner_from_remote("https://github.com/tatari-tv/bar.git"),
+            Some("tatari-tv".to_string())
+        );
+        // Trailing newline from `git remote get-url` output.
+        assert_eq!(
+            parse_owner_from_remote("https://github.com/tatari-tv/bar.git\n"),
+            Some("tatari-tv".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_owner_from_remote_rejects_non_github() {
+        assert_eq!(parse_owner_from_remote("https://gitlab.com/foo/bar.git"), None);
+        assert_eq!(parse_owner_from_remote(""), None);
+    }
+
+    #[test]
+    fn test_resolve_workflow_org_flag_wins() {
+        // --org overrides everything, no git remote needed (nonexistent dir is fine).
+        let mut cli = create_test_cli("proj");
+        cli.org = Some("explicit-org".to_string());
+        let config = create_test_config();
+        let org = resolve_workflow_org(&cli, &config, std::path::Path::new("/nonexistent"));
+        assert_eq!(org, "explicit-org");
+    }
+
+    #[test]
+    fn test_resolve_workflow_org_falls_back_to_config_default() {
+        // No --org and no git remote -> config default ("scottidler").
+        let cli = create_test_cli("proj");
+        let config = create_test_config();
+        let org = resolve_workflow_org(&cli, &config, std::path::Path::new("/nonexistent"));
+        assert_eq!(org, config.workflow.default_org);
     }
 
     #[test]
@@ -339,6 +449,8 @@ mod tests {
             no_verify: true,
             no_deps: true,
             rust_version: None,
+            org: None,
+            workflow_ref: None,
         };
         let config = create_test_config();
 
@@ -360,6 +472,8 @@ mod tests {
             no_verify: true,
             no_deps: true,
             rust_version: None,
+            org: None,
+            workflow_ref: None,
         };
         let config = create_test_config();
 
@@ -381,6 +495,8 @@ mod tests {
             no_verify: true,
             no_deps: true,
             rust_version: None,
+            org: None,
+            workflow_ref: None,
         };
         let config = create_test_config();
 
@@ -402,6 +518,8 @@ mod tests {
             no_verify: true,
             no_deps: true,
             rust_version: None,
+            org: None,
+            workflow_ref: None,
         };
         let config = create_test_config();
 
@@ -682,6 +800,8 @@ mod tests {
             no_verify: true,
             no_deps: true,
             rust_version: None,
+            org: None,
+            workflow_ref: None,
         };
         let config = create_test_config();
 

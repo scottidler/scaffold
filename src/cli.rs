@@ -54,6 +54,25 @@ pub struct Cli {
         help = "Rust toolchain version to pin in generated CI workflows (default: running rustc version)"
     )]
     pub rust_version: Option<String>,
+
+    /// GitHub org hosting the reusable workflows the generated CI/release callers
+    /// reference as <org>/github-actions (default: detected from the target repo's
+    /// git remote, else the config's workflow.default-org)
+    #[arg(
+        long,
+        value_name = "ORG",
+        help = "GitHub org hosting the reusable workflows (default: detected from git remote, else config)"
+    )]
+    pub org: Option<String>,
+
+    /// Git ref (tag/branch) the generated workflow callers pin the reusable
+    /// workflows to (default: the config's workflow.ref)
+    #[arg(
+        long = "workflow-ref",
+        value_name = "REF",
+        help = "Git ref to pin the reusable workflows to in generated callers (default: config workflow.ref)"
+    )]
+    pub workflow_ref: Option<String>,
 }
 
 #[cfg(test)]
@@ -121,6 +140,20 @@ mod tests {
         assert_eq!(cli.author, Some("Short Author".to_string()));
         assert_eq!(cli.directory, Some(PathBuf::from("/tmp/short")));
         assert_eq!(cli.config, Some(PathBuf::from("short.yml")));
+    }
+
+    #[test]
+    fn test_cli_parses_org_and_workflow_ref() {
+        let cli = Cli::try_parse_from(["scaffold", "proj", "--org", "tatari-tv", "--workflow-ref", "v5"]).unwrap();
+        assert_eq!(cli.org, Some("tatari-tv".to_string()));
+        assert_eq!(cli.workflow_ref, Some("v5".to_string()));
+    }
+
+    #[test]
+    fn test_cli_org_and_workflow_ref_default_none() {
+        let cli = Cli::try_parse_from(["scaffold", "proj"]).unwrap();
+        assert!(cli.org.is_none());
+        assert!(cli.workflow_ref.is_none());
     }
 
     #[test]
