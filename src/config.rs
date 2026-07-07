@@ -97,7 +97,7 @@ impl Default for TemplateConfig {
             dependencies: vec![
                 Dependency {
                     name: "clap".to_string(),
-                    features: vec!["derive".to_string()],
+                    features: vec!["derive".to_string(), "wrap_help".to_string()],
                 },
                 Dependency {
                     name: "eyre".to_string(),
@@ -341,11 +341,13 @@ workflow:
     }
 
     #[test]
-    fn test_template_config_clap_has_derive_feature() {
+    fn test_template_config_clap_has_derive_and_wrap_help_features() {
         let template = TemplateConfig::default();
 
         let clap_dep = template.dependencies.iter().find(|d| d.name == "clap").unwrap();
         assert!(clap_dep.features.contains(&"derive".to_string()));
+        // wrap_help makes --help wrap to the terminal width (see docs/wrap-help.md).
+        assert!(clap_dep.features.contains(&"wrap_help".to_string()));
     }
 
     #[test]

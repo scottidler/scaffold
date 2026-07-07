@@ -1007,7 +1007,7 @@ dependencies = [
 
 [[package]]
 name = "scaffold"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "assert_cmd",
  "clap",
