@@ -98,6 +98,8 @@ pub fn generate_project(
     // Generate GitHub Actions workflows
     generate_github_workflows(target_dir, &rust_version, workflow_org, workflow_ref, force)?;
 
+    generate_gitignore(target_dir)?;
+
     // Generate .otto.yml for CI
     generate_otto_yml(project_name, target_dir, force)?;
 
@@ -605,6 +607,37 @@ debug: false
     Ok(())
 }
 
+/// Entries every scaffolded repo needs. The skill clones a repo that already has GitHub's Rust
+/// `.gitignore`, so missing entries are appended rather than the file being skipped or replaced.
+const GITIGNORE_ENTRIES: &[&str] = &["/target", "mutants.out*", "/rc"];
+
+fn generate_gitignore(target_dir: &Path) -> Result<()> {
+    let path = target_dir.join(".gitignore");
+    let existing = if path.exists() {
+        fs::read_to_string(&path).context("Failed to read .gitignore")?
+    } else {
+        String::new()
+    };
+    let present: Vec<&str> = existing.lines().map(str::trim).collect();
+    let missing: Vec<&str> = GITIGNORE_ENTRIES
+        .iter()
+        .copied()
+        .filter(|entry| !present.contains(entry))
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    let mut content = existing;
+    if !content.is_empty() && !content.ends_with('\n') {
+        content.push('\n');
+    }
+    for entry in missing {
+        content.push_str(entry);
+        content.push('\n');
+    }
+    fs::write(&path, content).context("Failed to write .gitignore")
+}
+
 fn generate_clippy_toml(target_dir: &Path, force: bool) -> Result<()> {
     let clippy_toml = r#"too-many-arguments-threshold = 12
 "#;
@@ -635,6 +668,31 @@ fn generate_github_workflows(
 
     generate_github_ci_yml(&workflows_dir, rust_version, workflow_org, workflow_ref, force)?;
     generate_github_release_yml(&workflows_dir, rust_version, workflow_org, workflow_ref, force)?;
+    generate_github_mutants_yml(&workflows_dir, force)?;
+
+    Ok(())
+}
+
+fn generate_github_mutants_yml(workflows_dir: &Path, force: bool) -> Result<()> {
+    // Thin caller for tatari-tv/github-actions-public's reusable mutants workflow, which runs
+    // `otto mutants --diff` per shard on PRs. Pinned to a tag; always that repo, not workflow_org.
+    let mutants_yml = r#"name: mutants
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  mutants:
+    uses: tatari-tv/github-actions-public/.github/workflows/mutants.yml@v2.2.0
+"#;
+
+    write_if_not_exists(&workflows_dir.join("mutants.yml"), mutants_yml, force)?;
 
     Ok(())
 }
@@ -719,7 +777,7 @@ jobs:
     Ok(())
 }
 
-fn generate_otto_yml(_: &str, target_dir: &Path, force: bool) -> Result<()> {
+fn generate_otto_yml(project_name: &str, target_dir: &Path, force: bool) -> Result<()> {
     let otto_yml = r#"otto:
   api: 1
   tasks: [ci]
@@ -904,6 +962,88 @@ tasks:
 
       [ "$TEST_FAILED" = "1" ] || [ "$THRESHOLD_FAILED" = "1" ] && exit 1 || true
 
+  # Mutation testing: no args = whole workspace; --diff = scoped to a diff (NOT part of ci)
+  mutants:
+    help: "Mutation-test the workspace; --diff FILE scopes to a diff (CI use; NOT part of ci)"
+    params:
+      --diff:
+        default: ""
+        help: "Unified diff FILE: test only mutants in the changed lines"
+      --shard:
+        default: ""
+        help: "Run shard k/N of the mutant set (round-robin); e.g. 0/4"
+      --jobs:
+        default: ""
+        help: "Parallel mutant jobs (default 8; rejected with --in-place)"
+      --in-place:
+        default: false
+        help: "Mutate this checkout instead of copying it per job (single job; CI uses this)"
+    bash: |
+      # Pinned so a toolchain refresh cannot change what "zero survivors" means. The reusable
+      # mutants.yml exports MUTANTS_VERSION and installs the prebuilt binary first.
+      MUTANTS_VERSION="${MUTANTS_VERSION:-27.1.0}"
+      have=$(cargo mutants --version 2>/dev/null | awk '{print $2}')
+      if [ "$have" != "$MUTANTS_VERSION" ]; then
+        echo "installing cargo-mutants $MUTANTS_VERSION (found: ${have:-none})"
+        cargo install cargo-mutants --version "$MUTANTS_VERSION" --locked
+      fi
+
+      # Every job gets its own workspace copy and target/. A RAM-backed /tmp fills and dies with
+      # "No space left on device" after reporting zero survivors so far: a false green. Use a
+      # disk-backed dir, and not one under a .git ancestor (tests that assert "not a repo" break).
+      export TMPDIR="${TMPDIR_MUTANTS:-/var/tmp/__PROJECT__-mutants}"
+      mkdir -p "$TMPDIR"
+
+      # --in-place is single-job; cargo-mutants rejects the pair, a clear message beats its usage dump.
+      if [ "${in_place}" = "true" ] && [ -n "${jobs}" ]; then
+        echo "mutants: --in-place and --jobs cannot be used together (--in-place runs one job)" >&2
+        exit 2
+      fi
+      if [ "${in_place}" = "true" ]; then
+        MUTANT_JOBS=1
+        JOBS_ARGS=(--in-place)
+      else
+        MUTANT_JOBS="${jobs:-8}"
+        JOBS_ARGS=(--jobs "$MUTANT_JOBS")
+      fi
+      # --jobs bounds concurrent mutants, not the threads each test binary spawns. A rayon pool
+      # defaults to nproc per process, so cap it at cores/jobs or the timeout below is meaningless.
+      CORES=$(nproc)
+      export RAYON_NUM_THREADS=$(( CORES / MUTANT_JOBS > 0 ? CORES / MUTANT_JOBS : 1 ))
+      echo "mutants: --jobs $MUTANT_JOBS x RAYON_NUM_THREADS=$RAYON_NUM_THREADS on $CORES cores"
+
+      # --diff FILE is the scope; no --diff = the whole workspace.
+      # A diff with no '+++ b/' header is refused: cargo-mutants matches paths by the a/ b/
+      # prefixes, so a diff.mnemonicPrefix diff (i/ w/) lists 0 mutants and exits 0, a false green.
+      SCOPE_ARGS=()
+      if [ -n "${diff}" ]; then
+        if [ -s "${diff}" ] && ! grep -q '^+++ b/' "${diff}"; then
+          echo "mutants: ${diff} has no '+++ b/' header; regenerate it with 'git -c diff.mnemonicPrefix=false diff' (other prefixes match nothing and test nothing)" >&2
+          exit 2
+        fi
+        SCOPE_ARGS=(--in-diff "${diff}")
+      fi
+
+      # round-robin: the default `slice` gives ceil(total/N) chunks, so a shard can be empty.
+      SHARD_ARGS=()
+      if [ -n "${shard}" ]; then
+        SHARD_ARGS=(--shard "${shard}" --sharding round-robin)
+      fi
+
+      # --workspace is required: with default-members set, cargo-mutants scopes to those alone and
+      # can test nothing while exiting 0. --timeout is explicit because the baseline-derived one
+      # is measured idle, then mutants run parallel. No feature flags: match `otto test`.
+      # cargo-mutants' raw exit code goes to `rc` before this task exits non-zero: otto collapses
+      # failures to 1, and the CI report job must tell 2 (missed), 3 (timeout), 4 (baseline failed),
+      # 5/6 (diff mismatch/invalid) apart.
+      rm -f rc
+      rc=0
+      cargo mutants --workspace --timeout 300 --annotations auto \
+        "${SCOPE_ARGS[@]}" "${SHARD_ARGS[@]}" "${JOBS_ARGS[@]}" || rc=$?
+      echo "$rc" > rc
+      echo "mutants: cargo-mutants exit code $rc written to $(pwd)/rc"
+      exit "$rc"
+
   # Full CI pipeline
   ci:
     help: "Full CI pipeline (lint + bloat + check + test)"
@@ -938,9 +1078,10 @@ tasks:
     bash: |
       cargo install --path .
       echo "✅ Binary installed to ~/.cargo/bin"
-"#;
+"#
+    .replace("__PROJECT__", project_name);
 
-    write_if_not_exists(&target_dir.join(".otto.yml"), otto_yml, force)?;
+    write_if_not_exists(&target_dir.join(".otto.yml"), &otto_yml, force)?;
 
     Ok(())
 }

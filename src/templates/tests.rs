@@ -39,6 +39,7 @@ fn test_generate_project_creates_all_files() {
     assert!(temp_dir.path().join(".github/workflows/ci.yml").exists());
     assert!(temp_dir.path().join(".github/workflows/release.yml").exists());
     assert!(temp_dir.path().join(".pre-commit-config.yaml").exists());
+    assert!(temp_dir.path().join(".github/workflows/mutants.yml").exists());
 }
 
 #[test]
@@ -528,4 +529,60 @@ fn test_generate_project_creates_src_directory() {
     // Verify src directory was created
     assert!(temp_dir.path().join("src").exists());
     assert!(temp_dir.path().join("src").is_dir());
+}
+
+#[test]
+fn test_generate_github_mutants_yml_pins_public_reusable_workflow() {
+    let temp_dir = TempDir::new().unwrap();
+    generate_github_mutants_yml(temp_dir.path(), false).unwrap();
+
+    let yml = fs::read_to_string(temp_dir.path().join("mutants.yml")).unwrap();
+    assert!(yml.contains("uses: tatari-tv/github-actions-public/.github/workflows/mutants.yml@v2.2.0"));
+    assert!(yml.contains("pull-requests: write"));
+}
+
+#[test]
+fn test_generate_github_workflows_emits_mutants_caller() {
+    let temp_dir = TempDir::new().unwrap();
+    generate_github_workflows(temp_dir.path(), "1.95.0", "scottidler", "v1", false).unwrap();
+    assert!(temp_dir.path().join(".github/workflows/mutants.yml").exists());
+}
+
+#[test]
+fn test_generate_otto_yml_has_mutants_task_not_in_ci() {
+    let temp_dir = TempDir::new().unwrap();
+    generate_otto_yml("my-proj", temp_dir.path(), false).unwrap();
+
+    let otto = fs::read_to_string(temp_dir.path().join(".otto.yml")).unwrap();
+    assert!(otto.contains("\n  mutants:\n"));
+    assert!(otto.contains("--in-place"));
+    assert!(otto.contains("'^+++ b/'"));
+    assert!(otto.contains("/var/tmp/my-proj-mutants"));
+    assert!(!otto.contains("__PROJECT__"));
+    assert!(otto.contains("before: [lint, bloat, check, test]"));
+}
+
+#[test]
+fn test_generate_gitignore_creates_with_entries() {
+    let temp_dir = TempDir::new().unwrap();
+    generate_gitignore(temp_dir.path()).unwrap();
+
+    let gi = fs::read_to_string(temp_dir.path().join(".gitignore")).unwrap();
+    assert!(gi.lines().any(|l| l == "/rc"));
+    assert!(gi.lines().any(|l| l == "mutants.out*"));
+}
+
+#[test]
+fn test_generate_gitignore_appends_missing_and_is_idempotent() {
+    let temp_dir = TempDir::new().unwrap();
+    let path = temp_dir.path().join(".gitignore");
+    fs::write(&path, "/target\n*.swp").unwrap();
+
+    generate_gitignore(temp_dir.path()).unwrap();
+    generate_gitignore(temp_dir.path()).unwrap();
+
+    let gi = fs::read_to_string(&path).unwrap();
+    assert!(gi.contains("*.swp\n"));
+    assert_eq!(gi.lines().filter(|l| *l == "/rc").count(), 1);
+    assert_eq!(gi.lines().filter(|l| *l == "/target").count(), 1);
 }
