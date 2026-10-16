@@ -537,10 +537,12 @@ fn test_generate_project_creates_src_directory() {
 #[test]
 fn test_generate_github_mutants_yml_pins_public_reusable_workflow() {
     let temp_dir = TempDir::new().unwrap();
-    generate_github_mutants_yml(temp_dir.path(), false).unwrap();
+    generate_github_mutants_yml(temp_dir.path(), "1.99.1", false).unwrap();
 
     let yml = fs::read_to_string(temp_dir.path().join("mutants.yml")).unwrap();
-    assert!(yml.contains("uses: tatari-tv/github-actions-public/.github/workflows/mutants.yml@v2.2.0"));
+    assert!(yml.contains("uses: tatari-tv/github-actions-public/.github/workflows/mutants.yml@v2.3.1"));
+    assert!(yml.contains("rust-version: \"1.99.1\""));
+    assert!(!yml.contains("__RUST_VERSION__"));
     assert!(yml.contains("pull-requests: write"));
 }
 
@@ -588,4 +590,34 @@ fn test_generate_gitignore_appends_missing_and_is_idempotent() {
     assert!(gi.contains("*.swp\n"));
     assert_eq!(gi.lines().filter(|l| *l == "/rc").count(), 1);
     assert_eq!(gi.lines().filter(|l| *l == "/target").count(), 1);
+}
+
+#[test]
+fn test_generate_otto_yml_mutants_features_match_otto_test() {
+    let temp_dir = TempDir::new().unwrap();
+    generate_otto_yml("my-proj", temp_dir.path(), false).unwrap();
+
+    let otto = fs::read_to_string(temp_dir.path().join(".otto.yml")).unwrap();
+    let test_line = otto.lines().find(|l| l.trim_start().starts_with("cargo test")).unwrap();
+    let mutants_line = otto
+        .lines()
+        .find(|l| l.trim_start().starts_with("cargo mutants --workspace"))
+        .unwrap();
+    assert_eq!(
+        test_line.contains("--all-features"),
+        mutants_line.contains("--all-features")
+    );
+}
+
+#[test]
+fn test_generate_otto_yml_mutants_guard_reads_diff_once_and_checks_every_header() {
+    let temp_dir = TempDir::new().unwrap();
+    generate_otto_yml("my-proj", temp_dir.path(), false).unwrap();
+
+    let otto = fs::read_to_string(temp_dir.path().join(".otto.yml")).unwrap();
+    assert!(otto.contains("diff_copy=$(mktemp)"));
+    assert!(otto.contains("--in-diff \"$diff_copy\""));
+    assert!(otto.contains("grep -v -e '^+++ b/' -e '^+++ /dev/null'"));
+    assert!(!otto.contains("[ -s \"${diff}\" ]"));
+    assert!(otto.contains("awk '{print $2}' || true)"));
 }

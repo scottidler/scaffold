@@ -668,14 +668,15 @@ fn generate_github_workflows(
 
     generate_github_ci_yml(&workflows_dir, rust_version, workflow_org, workflow_ref, force)?;
     generate_github_release_yml(&workflows_dir, rust_version, workflow_org, workflow_ref, force)?;
-    generate_github_mutants_yml(&workflows_dir, force)?;
+    generate_github_mutants_yml(&workflows_dir, rust_version, force)?;
 
     Ok(())
 }
 
-fn generate_github_mutants_yml(workflows_dir: &Path, force: bool) -> Result<()> {
+fn generate_github_mutants_yml(workflows_dir: &Path, rust_version: &str, force: bool) -> Result<()> {
     // Thin caller for tatari-tv/github-actions-public's reusable mutants workflow, which runs
     // `otto mutants --diff` per shard on PRs. Pinned to a tag; always that repo, not workflow_org.
+    // rust-version is pinned like ci.yml/release.yml so the reusable's default cannot drift it.
     let mutants_yml = r#"name: mutants
 
 on:
@@ -689,10 +690,13 @@ permissions:
 
 jobs:
   mutants:
-    uses: tatari-tv/github-actions-public/.github/workflows/mutants.yml@v2.2.0
-"#;
+    uses: tatari-tv/github-actions-public/.github/workflows/mutants.yml@v2.3.1
+    with:
+      rust-version: "__RUST_VERSION__"
+"#
+    .replace("__RUST_VERSION__", rust_version);
 
-    write_if_not_exists(&workflows_dir.join("mutants.yml"), mutants_yml, force)?;
+    write_if_not_exists(&workflows_dir.join("mutants.yml"), &mutants_yml, force)?;
 
     Ok(())
 }
@@ -984,7 +988,7 @@ tasks:
       # A stale `rc` from a prior run must not outlive a refused or failed run below.
       rm -f rc
       MUTANTS_VERSION="${MUTANTS_VERSION:-27.1.0}"
-      have=$(cargo mutants --version 2>/dev/null | awk '{print $2}')
+      have=$(cargo mutants --version 2>/dev/null | awk '{print $2}' || true)
       if [ "$have" != "$MUTANTS_VERSION" ]; then
         echo "installing cargo-mutants $MUTANTS_VERSION (found: ${have:-none})"
         cargo install cargo-mutants --version "$MUTANTS_VERSION" --locked
@@ -1019,11 +1023,17 @@ tasks:
       # prefixes, so a diff.mnemonicPrefix diff (i/ w/) lists 0 mutants and exits 0, a false green.
       SCOPE_ARGS=()
       if [ -n "${diff}" ]; then
-        if [ -s "${diff}" ] && ! grep -q '^+++ b/' "${diff}"; then
-          echo "mutants: ${diff} has no '+++ b/' header; regenerate it with 'git -c diff.mnemonicPrefix=false diff' (other prefixes match nothing and test nothing)" >&2
+        # Copy first: `--diff <(git diff)` is a pipe, readable once and never `-s`.
+        diff_copy=$(mktemp)
+        cat "${diff}" > "$diff_copy"
+        # Every new-file header must be `+++ b/` (or /dev/null): one other prefix
+        # silently drops that file from the mutant set.
+        bad=$(grep '^+++ ' "$diff_copy" | grep -v -e '^+++ b/' -e '^+++ /dev/null' || true)
+        if [ -n "$bad" ]; then
+          echo "mutants: ${diff} has headers without the 'b/' prefix (e.g. '$(head -n1 <<< "$bad")'); regenerate it with 'git -c diff.mnemonicPrefix=false diff' (other prefixes match nothing and test nothing)" >&2
           exit 2
         fi
-        SCOPE_ARGS=(--in-diff "${diff}")
+        SCOPE_ARGS=(--in-diff "$diff_copy")
       fi
 
       # round-robin: the default `slice` gives ceil(total/N) chunks, so a shard can be empty.
@@ -1034,12 +1044,12 @@ tasks:
 
       # --workspace is required: with default-members set, cargo-mutants scopes to those alone and
       # can test nothing while exiting 0. --timeout is explicit because the baseline-derived one
-      # is measured idle, then mutants run parallel. No feature flags: match `otto test`.
+      # is measured idle, then mutants run parallel. --all-features matches `otto test`.
       # cargo-mutants' raw exit code goes to `rc` before this task exits non-zero: otto collapses
       # failures to 1, and the CI report job must tell 2 (missed), 3 (timeout), 4 (baseline failed),
       # 5/6 (diff mismatch/invalid) apart.
       rc=0
-      cargo mutants --workspace --timeout 300 --annotations auto \
+      cargo mutants --workspace --all-features --timeout 300 --annotations auto \
         "${SCOPE_ARGS[@]}" "${SHARD_ARGS[@]}" "${JOBS_ARGS[@]}" || rc=$?
       echo "$rc" > rc
       echo "mutants: cargo-mutants exit code $rc written to $(pwd)/rc"
