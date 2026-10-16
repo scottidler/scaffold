@@ -620,4 +620,6 @@ fn test_generate_otto_yml_mutants_guard_reads_diff_once_and_checks_every_header(
     assert!(otto.contains("grep -v -e '^+++ b/' -e '^+++ /dev/null'"));
     assert!(!otto.contains("[ -s \"${diff}\" ]"));
     assert!(otto.contains("awk '{print $2}' || true)"));
+    assert!(otto.contains("trap 'rm -f \"$diff_copy\"' EXIT"));
+    assert!(otto.contains("! grep -q '^+++ ' \"$diff_copy\""));
 }
