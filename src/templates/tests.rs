@@ -386,6 +386,9 @@ fn test_detect_rust_version_returns_dotted_semver() {
 }
 
 #[test]
+// `detect_rust_version` spawns `rustc` in the process cwd, which the `serial(cwd)` tests in main.rs
+// point at a TempDir they then delete; run outside that window or rustc fails and the pin falls back.
+#[serial_test::serial(cwd)]
 fn test_generate_project_pins_detected_version_without_override() {
     let temp_dir = TempDir::new().unwrap();
     let config = create_test_config();

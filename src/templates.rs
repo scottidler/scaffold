@@ -981,6 +981,8 @@ tasks:
     bash: |
       # Pinned so a toolchain refresh cannot change what "zero survivors" means. The reusable
       # mutants.yml exports MUTANTS_VERSION and installs the prebuilt binary first.
+      # A stale `rc` from a prior run must not outlive a refused or failed run below.
+      rm -f rc
       MUTANTS_VERSION="${MUTANTS_VERSION:-27.1.0}"
       have=$(cargo mutants --version 2>/dev/null | awk '{print $2}')
       if [ "$have" != "$MUTANTS_VERSION" ]; then
@@ -1036,7 +1038,6 @@ tasks:
       # cargo-mutants' raw exit code goes to `rc` before this task exits non-zero: otto collapses
       # failures to 1, and the CI report job must tell 2 (missed), 3 (timeout), 4 (baseline failed),
       # 5/6 (diff mismatch/invalid) apart.
-      rm -f rc
       rc=0
       cargo mutants --workspace --timeout 300 --annotations auto \
         "${SCOPE_ARGS[@]}" "${SHARD_ARGS[@]}" "${JOBS_ARGS[@]}" || rc=$?
