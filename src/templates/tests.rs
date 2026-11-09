@@ -63,6 +63,7 @@ fn test_generate_cargo_toml_basic_structure() {
     assert!(cargo_toml.contains("[dev-dependencies]"));
     assert!(cargo_toml.contains("tempfile = \"3\""));
     assert!(cargo_toml.contains("[build-dependencies]"));
+    assert!(cargo_toml.contains("build-version = { git = \"https://github.com/tatari-tv/build-version-rs\""));
 }
 
 #[test]
@@ -112,10 +113,7 @@ fn test_generate_build_rs() {
     let build_rs = fs::read_to_string(temp_dir.path().join("build.rs")).unwrap();
 
     assert!(build_rs.contains("fn main()"));
-    assert!(build_rs.contains("git describe"));
-    assert!(build_rs.contains("GIT_DESCRIBE"));
-    assert!(build_rs.contains("cargo:rerun-if-changed=.git/HEAD"));
-    assert!(build_rs.contains("cargo:rerun-if-changed=.git/refs/"));
+    assert!(build_rs.contains("build_version::emit()"));
 }
 
 #[test]

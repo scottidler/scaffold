@@ -5,7 +5,7 @@ use std::path::PathBuf;
 #[command(
     name = "scaffold",
     about = "A Rust CLI project scaffolding tool that generates production-ready CLI applications",
-    version = env!("GIT_DESCRIBE"),
+    version = env!("BUILD_VERSION"),
     after_help = "Logs are written to: ~/.local/share/scaffold/logs/scaffold.log\n\nThis tool generates complete Rust CLI projects with best practices including:\n- Proper error handling with eyre\n- Structured logging with env_logger\n- Configuration management with serde_yaml\n- Modern CLI parsing with clap\n- Git version integration"
 )]
 pub struct Cli {
@@ -201,8 +201,8 @@ mod tests {
     }
 
     #[test]
-    fn test_cli_version_uses_git_describe() {
-        // This test verifies that the version field references GIT_DESCRIBE
+    fn test_cli_version_uses_build_version() {
+        // This test verifies that the version field references BUILD_VERSION
         // The actual value depends on build-time environment
         let cmd = Cli::command();
         let version = cmd.get_version().unwrap_or("unknown");
