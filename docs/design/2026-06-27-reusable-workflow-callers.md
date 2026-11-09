@@ -2,7 +2,7 @@
 
 **Author:** Scott Idler
 **Date:** 2026-06-27
-**Status:** Implemented
+**Status:** Superseded on 2026-11-09. Every caller now `uses:` `tatari-tv/github-actions-public` at one shared tag (config `workflow.ref`, `--workflow-ref`); the per-org `<org>/github-actions` resolution, `--org`, and `workflow.default-org` were removed, and a `mutants.yml` caller joined `ci.yml` and `release.yml`. Kept for the history of the thin-caller shape.
 **Supersedes:** `2026-03-24-github-workflows.md`
 
 ## Summary
@@ -11,8 +11,10 @@ Replace the fully-inlined `.github/workflows/{ci,release}.yml` that scaffold
 generated with **thin caller workflows** that delegate to the reusable workflows
 in `<org>/github-actions`:
 
-- `ci.yml` -> `uses: <org>/github-actions/.github/workflows/rust-ci.yml@<ref>`
-- `release.yml` -> `uses: <org>/github-actions/.github/workflows/rust-cli-release.yml@<ref>`
+- `ci.yml` -> `uses: tatari-tv/github-actions-public/.github/workflows/rust-ci.yml@<ref>`
+- `release.yml` -> `uses: tatari-tv/github-actions-public/.github/workflows/rust-cli-release.yml@<ref>`
+
+(As first implemented the repo was `<org>/github-actions`; see Status.)
 
 The org is resolved per-project (it depends on whether the repo lives under
 `scottidler` or `tatari-tv`), so a scaffolded repo calls the reusable workflow in
@@ -102,7 +104,7 @@ permissions:
   contents: read
 jobs:
   ci:
-    uses: <org>/github-actions/.github/workflows/rust-ci.yml@<ref>
+    uses: tatari-tv/github-actions-public/.github/workflows/rust-ci.yml@<ref>
     with:
       rust-version: "<pinned>"
 ```
@@ -120,7 +122,7 @@ permissions:
   contents: write
 jobs:
   release:
-    uses: <org>/github-actions/.github/workflows/rust-cli-release.yml@<ref>
+    uses: tatari-tv/github-actions-public/.github/workflows/rust-cli-release.yml@<ref>
     with:
       rust-version: "<pinned>"
 ```
@@ -191,7 +193,7 @@ action to a commit SHA. No secrets are required for the default public-CLI path.
 
 ## References
 
-- Reusable workflows (tatari-tv): `~/repos/tatari-tv/github-actions/.github/workflows/{rust-ci,rust-cli-release}.yml`
+- Reusable workflows: `~/repos/tatari-tv/github-actions-public/.github/workflows/{rust-ci,rust-cli-release,mutants}.yml`
 - Reusable workflows (scottidler twin): `github.com/scottidler/github-actions` @ `v1`
 - Caller example: `~/repos/tatari-tv/marquee/main/.github/workflows/{ci,release}.yml`
 - Scaffold templates: `~/repos/scottidler/scaffold/src/templates.rs`
