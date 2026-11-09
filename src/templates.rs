@@ -57,7 +57,6 @@ pub fn generate_project(
     include_deps: bool,
     force: bool,
     rust_version: Option<&str>,
-    workflow_org: &str,
     workflow_ref: &str,
 ) -> Result<()> {
     // Pin generated CI workflows to the explicit override, else the running toolchain.
@@ -86,6 +85,9 @@ pub fn generate_project(
     generate_config_rs(&src_dir, force)?;
     generate_config_tests_rs(&src_dir, force)?;
 
+    // Generate the --version contract test
+    generate_version_test_rs(project_name, target_dir, force)?;
+
     // Generate sample config file
     generate_sample_config(project_name, target_dir, force)?;
 
@@ -96,7 +98,7 @@ pub fn generate_project(
     generate_rustfmt_toml(target_dir, force)?;
 
     // Generate GitHub Actions workflows
-    generate_github_workflows(target_dir, &rust_version, workflow_org, workflow_ref, force)?;
+    generate_github_workflows(target_dir, &rust_version, workflow_ref, force)?;
 
     generate_gitignore(target_dir)?;
 
@@ -568,6 +570,45 @@ fn test_config_default_values() {
     Ok(())
 }
 
+fn generate_version_test_rs(project_name: &str, target_dir: &Path, force: bool) -> Result<()> {
+    // Pins both halves of the build-version contract: `--version` prints what build.rs
+    // computed, and that value is anchored on Cargo.toml's version (vX.Y.Z, or
+    // vX.Y.Z-N-g<sha> when the tree is N commits past the tag).
+    let tests_dir = target_dir.join("tests");
+    fs::create_dir_all(&tests_dir).context("Failed to create tests directory")?;
+
+    let version_rs = r#"//! `__PROJECT__ --version` reports the anchored build version computed by `build.rs`.
+
+use std::process::Command;
+
+#[test]
+fn version_flag_prints_build_version() {
+    let out = Command::new(env!("CARGO_BIN_EXE___PROJECT__"))
+        .arg("--version")
+        .output()
+        .expect("run __PROJECT__ --version");
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).expect("utf8");
+    assert_eq!(stdout.trim(), format!("__PROJECT__ {}", env!("BUILD_VERSION")));
+}
+
+#[test]
+fn build_version_is_anchored_on_cargo_toml_version() {
+    let root = format!("v{}", env!("CARGO_PKG_VERSION"));
+    let built = env!("BUILD_VERSION");
+    assert!(
+        built == root || built.starts_with(&format!("{root}-")),
+        "{built} is not anchored on {root}"
+    );
+}
+"#
+    .replace("__PROJECT__", project_name);
+
+    write_if_not_exists(&tests_dir.join("version.rs"), &version_rs, force)?;
+
+    Ok(())
+}
+
 fn generate_sample_config(project_name: &str, target_dir: &Path, force: bool) -> Result<()> {
     let sample_config = format!(
         r#"# {}.yml - Sample configuration file
@@ -633,27 +674,25 @@ fn generate_rustfmt_toml(target_dir: &Path, force: bool) -> Result<()> {
     Ok(())
 }
 
-fn generate_github_workflows(
-    target_dir: &Path,
-    rust_version: &str,
-    workflow_org: &str,
-    workflow_ref: &str,
-    force: bool,
-) -> Result<()> {
+/// The one repo every generated caller `uses:`. The fleet converged on the public
+/// twin so a scaffolded repo in any org calls the same reusable workflows at the
+/// same tag; a private `<org>/github-actions` cannot be called from a personal repo.
+const WORKFLOWS_REPO: &str = "tatari-tv/github-actions-public";
+
+fn generate_github_workflows(target_dir: &Path, rust_version: &str, workflow_ref: &str, force: bool) -> Result<()> {
     let workflows_dir = target_dir.join(".github").join("workflows");
     fs::create_dir_all(&workflows_dir).context("Failed to create .github/workflows directory")?;
 
-    generate_github_ci_yml(&workflows_dir, rust_version, workflow_org, workflow_ref, force)?;
-    generate_github_release_yml(&workflows_dir, rust_version, workflow_org, workflow_ref, force)?;
-    generate_github_mutants_yml(&workflows_dir, rust_version, force)?;
+    generate_github_ci_yml(&workflows_dir, rust_version, workflow_ref, force)?;
+    generate_github_release_yml(&workflows_dir, rust_version, workflow_ref, force)?;
+    generate_github_mutants_yml(&workflows_dir, workflow_ref, force)?;
 
     Ok(())
 }
 
-fn generate_github_mutants_yml(workflows_dir: &Path, rust_version: &str, force: bool) -> Result<()> {
-    // Thin caller for tatari-tv/github-actions-public's reusable mutants workflow, which runs
-    // `otto mutants --diff` per shard on PRs. Pinned to a tag; always that repo, not workflow_org.
-    // rust-version is pinned like ci.yml/release.yml so the reusable's default cannot drift it.
+fn generate_github_mutants_yml(workflows_dir: &Path, workflow_ref: &str, force: bool) -> Result<()> {
+    // Thin caller for the reusable mutants workflow (`otto mutants --diff` per shard on PRs).
+    // The fleet's callers pass no rust-version; the reusable workflow's default is the pin.
     let mutants_yml = r#"name: mutants
 
 on:
@@ -667,47 +706,37 @@ permissions:
 
 jobs:
   mutants:
-    uses: tatari-tv/github-actions-public/.github/workflows/mutants.yml@v2.3.1
-    with:
-      rust-version: "__RUST_VERSION__"
+    uses: __REPO__/.github/workflows/mutants.yml@__REF__
 "#
-    .replace("__RUST_VERSION__", rust_version);
+    .replace("__REPO__", WORKFLOWS_REPO)
+    .replace("__REF__", workflow_ref);
 
     write_if_not_exists(&workflows_dir.join("mutants.yml"), &mutants_yml, force)?;
 
     Ok(())
 }
 
-fn generate_github_ci_yml(
-    workflows_dir: &Path,
-    rust_version: &str,
-    workflow_org: &str,
-    workflow_ref: &str,
-    force: bool,
-) -> Result<()> {
-    // Thin caller: delegates to the reusable rust-ci workflow in <org>/github-actions
-    // (runs `otto ci`). Edit the reusable workflow there, not this file.
-    let ci_yml = r#"name: CI
+fn generate_github_ci_yml(workflows_dir: &Path, rust_version: &str, workflow_ref: &str, force: bool) -> Result<()> {
+    // Thin caller: delegates to the reusable rust-ci workflow (runs `otto ci`).
+    // Edit the reusable workflow there, not this file.
+    let ci_yml = r#"name: ci
 
-# Thin caller: delegates Rust CI (otto ci) to the org's reusable workflow.
-# Source: __ORG__/github-actions/.github/workflows/rust-ci.yml (pinned to __REF__).
-# Change the pipeline by editing the reusable workflow, not this file.
-
+# CI = `otto ci` via the shared rust-ci workflow; the caller owns the trigger.
 on:
   push:
     branches: [main]
-  pull_request:
+  pull_request: {}
 
 permissions:
   contents: read
 
 jobs:
   ci:
-    uses: __ORG__/github-actions/.github/workflows/rust-ci.yml@__REF__
+    uses: __REPO__/.github/workflows/rust-ci.yml@__REF__
     with:
       rust-version: "__RUST_VERSION__"
 "#
-    .replace("__ORG__", workflow_org)
+    .replace("__REPO__", WORKFLOWS_REPO)
     .replace("__REF__", workflow_ref)
     .replace("__RUST_VERSION__", rust_version);
 
@@ -719,37 +748,35 @@ jobs:
 fn generate_github_release_yml(
     workflows_dir: &Path,
     rust_version: &str,
-    workflow_org: &str,
     workflow_ref: &str,
     force: bool,
 ) -> Result<()> {
-    // Thin caller: delegates to the reusable rust-cli-release workflow in
-    // <org>/github-actions (cross-compile, tarball + sha256, publish GitHub Release).
-    // The reusable workflow defaults the binary/archive names to the repo name, so a
-    // single-binary crate needs no inputs beyond the pinned toolchain.
-    let release_yml = r#"name: Release
+    // Thin caller: delegates the tag-driven release to the reusable rust-cli-release
+    // workflow (cross-compile, tarball + sha256, publish GitHub Release). The reusable
+    // workflow defaults the binary/archive names to the repo name, so a single-binary
+    // crate needs no inputs beyond the pinned toolchain.
+    let release_yml = r#"name: release
 
-# Thin caller: delegates the tag-driven CLI release to the org's reusable workflow.
-# Source: __ORG__/github-actions/.github/workflows/rust-cli-release.yml (pinned to __REF__).
-# Cross-compiles linux amd64/arm64 + macOS x86_64/arm64, tarballs + sha256 each, and
-# publishes a GitHub Release. Change the pipeline by editing the reusable workflow.
+# Tag-driven release. On a v* tag, the shared reusable workflow cross-compiles
+# linux amd64/arm64 and macOS x86_64/arm64 (macos-15), tarballs + sha256 each,
+# and publishes the GitHub Release.
 
 on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch: {}
 
 permissions:
   contents: write
 
 jobs:
-  release:
-    uses: __ORG__/github-actions/.github/workflows/rust-cli-release.yml@__REF__
+  cli-release:
+    name: CLI Release
+    uses: __REPO__/.github/workflows/rust-cli-release.yml@__REF__
     with:
       rust-version: "__RUST_VERSION__"
 "#
-    .replace("__ORG__", workflow_org)
+    .replace("__REPO__", WORKFLOWS_REPO)
     .replace("__REF__", workflow_ref)
     .replace("__RUST_VERSION__", rust_version);
 

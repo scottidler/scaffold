@@ -16,18 +16,14 @@ pub struct Config {
     pub workflow: WorkflowConfig,
 }
 
-/// Wiring for the generated `.github/workflows/{ci,release}.yml` thin callers.
+/// Wiring for the generated `.github/workflows/{ci,release,mutants}.yml` thin callers.
 ///
 /// The generated workflows do not inline their pipeline; they `uses:` the reusable
-/// workflows in `<org>/github-actions`. The org is normally auto-detected from the
-/// target repo's git remote (see `main::resolve_workflow_org`); these fields are the
-/// fallback org and the ref (tag/branch) the callers pin to.
+/// workflows in `tatari-tv/github-actions-public` (`templates::WORKFLOWS_REPO`). The
+/// one knob is the tag every caller pins to.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct WorkflowConfig {
-    /// Org hosting the reusable workflows when it can't be detected from the git
-    /// remote. The reusable repo is always `<default_org>/github-actions`.
-    pub default_org: String,
     /// Git ref (tag/branch) the generated callers pin the reusable workflows to.
     #[serde(rename = "ref")]
     pub git_ref: String,
@@ -36,8 +32,7 @@ pub struct WorkflowConfig {
 impl Default for WorkflowConfig {
     fn default() -> Self {
         Self {
-            default_org: "scottidler".to_string(),
-            git_ref: "v1".to_string(),
+            git_ref: "v2.4.2".to_string(),
         }
     }
 }
@@ -297,8 +292,7 @@ mod tests {
     #[test]
     fn test_workflow_config_default_values() {
         let config = Config::default();
-        assert_eq!(config.workflow.default_org, "scottidler");
-        assert_eq!(config.workflow.git_ref, "v1");
+        assert_eq!(config.workflow.git_ref, "v2.4.2");
     }
 
     #[test]
@@ -306,12 +300,18 @@ mod tests {
         // The YAML key is `ref` (a Rust keyword), renamed to `git_ref` in the struct.
         let yaml = r#"
 workflow:
-  default-org: tatari-tv
-  ref: v5
+  ref: v9.9.9
 "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(config.workflow.default_org, "tatari-tv");
-        assert_eq!(config.workflow.git_ref, "v5");
+        assert_eq!(config.workflow.git_ref, "v9.9.9");
+    }
+
+    #[test]
+    fn test_workflow_config_ignores_retired_default_org_key() {
+        // Older scaffold.yml files still carry workflow.default-org; it must not break loading.
+        let yaml = "workflow:\n  default-org: scottidler\n  ref: v9.9.9\n";
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.workflow.git_ref, "v9.9.9");
     }
 
     #[test]

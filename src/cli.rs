@@ -55,16 +55,6 @@ pub struct Cli {
     )]
     pub rust_version: Option<String>,
 
-    /// GitHub org hosting the reusable workflows the generated CI/release callers
-    /// reference as <org>/github-actions (default: detected from the target repo's
-    /// git remote, else the config's workflow.default-org)
-    #[arg(
-        long,
-        value_name = "ORG",
-        help = "GitHub org hosting the reusable workflows (default: detected from git remote, else config)"
-    )]
-    pub org: Option<String>,
-
     /// Git ref (tag/branch) the generated workflow callers pin the reusable
     /// workflows to (default: the config's workflow.ref)
     #[arg(
@@ -143,16 +133,20 @@ mod tests {
     }
 
     #[test]
-    fn test_cli_parses_org_and_workflow_ref() {
-        let cli = Cli::try_parse_from(["scaffold", "proj", "--org", "tatari-tv", "--workflow-ref", "v5"]).unwrap();
-        assert_eq!(cli.org, Some("tatari-tv".to_string()));
-        assert_eq!(cli.workflow_ref, Some("v5".to_string()));
+    fn test_cli_parses_workflow_ref() {
+        let cli = Cli::try_parse_from(["scaffold", "proj", "--workflow-ref", "v9.9.9"]).unwrap();
+        assert_eq!(cli.workflow_ref, Some("v9.9.9".to_string()));
     }
 
     #[test]
-    fn test_cli_org_and_workflow_ref_default_none() {
+    fn test_cli_rejects_retired_org_flag() {
+        // The callers always name the public twin now; there is no org to pick.
+        assert!(Cli::try_parse_from(["scaffold", "proj", "--org", "tatari-tv"]).is_err());
+    }
+
+    #[test]
+    fn test_cli_workflow_ref_defaults_none() {
         let cli = Cli::try_parse_from(["scaffold", "proj"]).unwrap();
-        assert!(cli.org.is_none());
         assert!(cli.workflow_ref.is_none());
     }
 

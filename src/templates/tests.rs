@@ -22,8 +22,7 @@ fn test_generate_project_creates_all_files() {
         false,
         false,
         None,
-        "scottidler",
-        "v1",
+        "v2.4.2",
     );
     assert!(result.is_ok());
 
@@ -40,6 +39,7 @@ fn test_generate_project_creates_all_files() {
     assert!(temp_dir.path().join(".github/workflows/release.yml").exists());
     assert!(temp_dir.path().join(".pre-commit-config.yaml").exists());
     assert!(temp_dir.path().join(".github/workflows/mutants.yml").exists());
+    assert!(temp_dir.path().join("tests/version.rs").exists());
 }
 
 #[test]
@@ -321,8 +321,7 @@ fn test_generate_project_with_different_authors() {
             false,
             false,
             None,
-            "scottidler",
-            "v1",
+            "v2.4.2",
         );
         assert!(result.is_ok(), "Failed for author: {}", author);
 
@@ -349,8 +348,7 @@ fn test_generate_project_with_special_characters_in_name() {
             false,
             false,
             None,
-            "scottidler",
-            "v1",
+            "v2.4.2",
         );
         assert!(result.is_ok(), "Failed for project name: {}", project_name);
 
@@ -400,8 +398,7 @@ fn test_generate_project_pins_detected_version_without_override() {
         false,
         false,
         None,
-        "scottidler",
-        "v1",
+        "v2.4.2",
     );
     assert!(result.is_ok());
 
@@ -416,19 +413,18 @@ fn test_generate_github_ci_yml() {
     let workflows_dir = temp_dir.path().join(".github").join("workflows");
     fs::create_dir_all(&workflows_dir).unwrap();
 
-    let result = generate_github_ci_yml(&workflows_dir, "1.95.0", "scottidler", "v1", false);
+    let result = generate_github_ci_yml(&workflows_dir, "1.95.0", "v2.4.2", false);
     assert!(result.is_ok());
 
     let ci_yml = fs::read_to_string(workflows_dir.join("ci.yml")).unwrap();
 
-    assert!(ci_yml.contains("name: CI"));
+    assert!(ci_yml.contains("name: ci"));
     assert!(ci_yml.contains("branches: [main]"));
-    // Thin caller: wires to the org's reusable rust-ci workflow at the given ref,
+    // Thin caller: wires to the public twin's reusable rust-ci workflow at the given ref,
     // passing the pinned toolchain through as the rust-version input.
-    assert!(ci_yml.contains("uses: scottidler/github-actions/.github/workflows/rust-ci.yml@v1"));
+    assert!(ci_yml.contains("uses: tatari-tv/github-actions-public/.github/workflows/rust-ci.yml@v2.4.2"));
     assert!(ci_yml.contains("rust-version: \"1.95.0\""));
     assert!(!ci_yml.contains("__RUST_VERSION__"));
-    assert!(!ci_yml.contains("__ORG__"));
     assert!(!ci_yml.contains("__REF__"));
     assert!(ci_yml.contains("permissions:"));
     assert!(ci_yml.contains("contents: read"));
@@ -437,16 +433,16 @@ fn test_generate_github_ci_yml() {
 }
 
 #[test]
-fn test_generate_github_ci_yml_honors_org_and_ref() {
+fn test_generate_github_ci_yml_honors_ref() {
     let temp_dir = TempDir::new().unwrap();
     let workflows_dir = temp_dir.path().join(".github").join("workflows");
     fs::create_dir_all(&workflows_dir).unwrap();
 
-    let result = generate_github_ci_yml(&workflows_dir, "1.96.0", "tatari-tv", "v5", false);
+    let result = generate_github_ci_yml(&workflows_dir, "1.96.0", "v9.9.9", false);
     assert!(result.is_ok());
 
     let ci_yml = fs::read_to_string(workflows_dir.join("ci.yml")).unwrap();
-    assert!(ci_yml.contains("uses: tatari-tv/github-actions/.github/workflows/rust-ci.yml@v5"));
+    assert!(ci_yml.contains("uses: tatari-tv/github-actions-public/.github/workflows/rust-ci.yml@v9.9.9"));
 }
 
 #[test]
@@ -455,19 +451,20 @@ fn test_generate_github_release_yml() {
     let workflows_dir = temp_dir.path().join(".github").join("workflows");
     fs::create_dir_all(&workflows_dir).unwrap();
 
-    let result = generate_github_release_yml(&workflows_dir, "1.95.0", "scottidler", "v1", false);
+    let result = generate_github_release_yml(&workflows_dir, "1.95.0", "v2.4.2", false);
     assert!(result.is_ok());
 
     let release_yml = fs::read_to_string(workflows_dir.join("release.yml")).unwrap();
 
-    assert!(release_yml.contains("name: Release"));
+    assert!(release_yml.contains("name: release"));
     assert!(release_yml.contains("- 'v*'"));
-    // Thin caller: wires to the org's reusable rust-cli-release workflow at the ref,
+    // Thin caller: wires to the public twin's reusable rust-cli-release workflow at the ref,
     // passing the pinned toolchain through as the rust-version input.
-    assert!(release_yml.contains("uses: scottidler/github-actions/.github/workflows/rust-cli-release.yml@v1"));
+    assert!(
+        release_yml.contains("uses: tatari-tv/github-actions-public/.github/workflows/rust-cli-release.yml@v2.4.2")
+    );
     assert!(release_yml.contains("rust-version: \"1.95.0\""));
     assert!(!release_yml.contains("__RUST_VERSION__"));
-    assert!(!release_yml.contains("__ORG__"));
     assert!(!release_yml.contains("__REF__"));
     assert!(release_yml.contains("contents: write"));
     // The cross-compile matrix now lives in the reusable workflow, not inlined here.
@@ -481,23 +478,25 @@ fn test_generate_github_release_yml() {
 }
 
 #[test]
-fn test_generate_github_release_yml_honors_org_and_ref() {
+fn test_generate_github_release_yml_honors_ref() {
     let temp_dir = TempDir::new().unwrap();
     let workflows_dir = temp_dir.path().join(".github").join("workflows");
     fs::create_dir_all(&workflows_dir).unwrap();
 
-    let result = generate_github_release_yml(&workflows_dir, "1.96.0", "tatari-tv", "v5", false);
+    let result = generate_github_release_yml(&workflows_dir, "1.96.0", "v9.9.9", false);
     assert!(result.is_ok());
 
     let release_yml = fs::read_to_string(workflows_dir.join("release.yml")).unwrap();
-    assert!(release_yml.contains("uses: tatari-tv/github-actions/.github/workflows/rust-cli-release.yml@v5"));
+    assert!(
+        release_yml.contains("uses: tatari-tv/github-actions-public/.github/workflows/rust-cli-release.yml@v9.9.9")
+    );
 }
 
 #[test]
 fn test_generate_github_workflows() {
     let temp_dir = TempDir::new().unwrap();
 
-    let result = generate_github_workflows(temp_dir.path(), "1.95.0", "scottidler", "v1", false);
+    let result = generate_github_workflows(temp_dir.path(), "1.95.0", "v2.4.2", false);
     assert!(result.is_ok());
 
     assert!(temp_dir.path().join(".github/workflows/ci.yml").exists());
@@ -522,8 +521,7 @@ fn test_generate_project_creates_src_directory() {
         false,
         false,
         None,
-        "scottidler",
-        "v1",
+        "v2.4.2",
     );
     assert!(result.is_ok());
 
@@ -533,21 +531,78 @@ fn test_generate_project_creates_src_directory() {
 }
 
 #[test]
-fn test_generate_github_mutants_yml_pins_public_reusable_workflow() {
+fn test_generate_github_mutants_yml_calls_public_reusable_workflow_at_ref() {
     let temp_dir = TempDir::new().unwrap();
-    generate_github_mutants_yml(temp_dir.path(), "1.99.1", false).unwrap();
+    generate_github_mutants_yml(temp_dir.path(), "v9.9.9", false).unwrap();
 
     let yml = fs::read_to_string(temp_dir.path().join("mutants.yml")).unwrap();
-    assert!(yml.contains("uses: tatari-tv/github-actions-public/.github/workflows/mutants.yml@v2.3.1"));
-    assert!(yml.contains("rust-version: \"1.99.1\""));
-    assert!(!yml.contains("__RUST_VERSION__"));
+    assert!(yml.contains("uses: tatari-tv/github-actions-public/.github/workflows/mutants.yml@v9.9.9"));
+    // The fleet's mutants callers pass no inputs; the reusable workflow's default is the pin.
+    assert!(!yml.contains("rust-version"));
+    assert!(!yml.contains("__REF__"));
     assert!(yml.contains("pull-requests: write"));
+}
+
+#[test]
+fn test_generated_workflows_match_fleet_standard() {
+    // Every caller names the public twin at the one shared default ref; nothing points
+    // at a private <org>/github-actions repo or a floating alias like v1.
+    let temp_dir = TempDir::new().unwrap();
+    let config = create_test_config();
+    generate_project(
+        "fleet",
+        temp_dir.path(),
+        "Test Author",
+        &config,
+        false,
+        false,
+        Some("1.99.1"),
+        &config.workflow.git_ref,
+    )
+    .unwrap();
+
+    let workflows_dir = temp_dir.path().join(".github/workflows");
+    let mut uses_lines = 0;
+    for name in ["ci.yml", "release.yml", "mutants.yml"] {
+        let yml = fs::read_to_string(workflows_dir.join(name)).unwrap();
+        assert!(
+            !yml.contains("/github-actions/"),
+            "{name} names the private github-actions repo"
+        );
+        for line in yml.lines().filter(|l| l.trim_start().starts_with("uses:")) {
+            uses_lines += 1;
+            assert!(line.contains("tatari-tv/github-actions-public/"), "{name}: {line}");
+            assert!(line.ends_with("@v2.4.2"), "{name}: {line}");
+        }
+    }
+    assert_eq!(uses_lines, 3, "exactly one uses: line per caller");
+
+    // ci and release take the toolchain pin; mutants does not.
+    for name in ["ci.yml", "release.yml"] {
+        let yml = fs::read_to_string(workflows_dir.join(name)).unwrap();
+        assert!(
+            yml.contains("rust-version: \"1.99.1\""),
+            "{name} lacks the toolchain pin"
+        );
+    }
+}
+
+#[test]
+fn test_generate_version_test_rs_pins_build_version_contract() {
+    let temp_dir = TempDir::new().unwrap();
+    generate_version_test_rs("my-tool", temp_dir.path(), false).unwrap();
+
+    let rs = fs::read_to_string(temp_dir.path().join("tests/version.rs")).unwrap();
+    assert!(rs.contains("env!(\"CARGO_BIN_EXE_my-tool\")"));
+    assert!(rs.contains("format!(\"my-tool {}\", env!(\"BUILD_VERSION\"))"));
+    assert!(rs.contains("env!(\"CARGO_PKG_VERSION\")"));
+    assert!(!rs.contains("__PROJECT__"));
 }
 
 #[test]
 fn test_generate_github_workflows_emits_mutants_caller() {
     let temp_dir = TempDir::new().unwrap();
-    generate_github_workflows(temp_dir.path(), "1.95.0", "scottidler", "v1", false).unwrap();
+    generate_github_workflows(temp_dir.path(), "1.95.0", "v2.4.2", false).unwrap();
     assert!(temp_dir.path().join(".github/workflows/mutants.yml").exists());
 }
 
